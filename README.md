@@ -24,6 +24,7 @@ This repository is intentionally public-safe:
 - `skills/test-driven-development/` — RED/GREEN/REFACTOR workflow.
 - `skills/spike/` — time-boxed experiments before committing to a build.
 - `skills/requesting-code-review/` — pre-commit review and quality gates.
+- `skills/system-documenter/` — architecture cartography and living system documentation.
 - `skills/dogfood/` — exploratory QA of web applications.
 
 ### GitHub / codebase workflow
