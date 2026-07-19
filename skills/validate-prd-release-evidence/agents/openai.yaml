@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate PRD Release Evidence"
+  short_description: "Audit PRD completion with release-grade evidence"
+  default_prompt: "Use $validate-prd-release-evidence to audit this PRD or release against its acceptance criteria and report evidence-backed gates."

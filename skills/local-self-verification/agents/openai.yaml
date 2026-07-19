@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Self Verification"
+  short_description: "Plan evidence-backed local QA verification."
+  default_prompt: "Create a self-verification plan for this local feature or workflow."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Credit Ledger Invariants"
+  short_description: "Prove paid-credit conservation and refund correctness"
+  default_prompt: "Use $validate-credit-ledger-invariants to audit this paid-credit workflow for pool conservation, atomicity, and concurrency safety."

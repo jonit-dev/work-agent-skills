@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stripe Debugging"
+  short_description: "Diagnose Stripe integration failures safely"
+  default_prompt: "Use $stripe-debugging to diagnose this Stripe issue against the account and mode I specify."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Concurrent Workflows"
+  short_description: "Prove concurrent workflow safety with real races"
+  default_prompt: "Use $validate-concurrent-workflows to audit and test this concurrent database workflow."

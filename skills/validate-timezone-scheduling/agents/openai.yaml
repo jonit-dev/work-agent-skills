@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Timezone Scheduling"
+  short_description: "Prove DST-safe scheduling and calendar behavior"
+  default_prompt: "Use $validate-timezone-scheduling to audit and test this timezone-aware scheduling workflow."

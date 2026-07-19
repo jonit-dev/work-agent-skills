@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify Android WebView Input"
+  short_description: "Verify responsive WebView visuals and input"
+  default_prompt: "Use $verify-android-webview-responsive-input to verify an exact Android APK across responsive WebView sizes and diagnose cross-frame pointer errors."

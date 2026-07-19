@@ -1,0 +1,4 @@
+interface:
+  display_name: "Forecasting Experiments"
+  short_description: "Multi-agent forecasting science lab"
+  default_prompt: "Use $forecasting-experiments to investigate whether BTC data contains a self-verifiable improvement for the forecast app."

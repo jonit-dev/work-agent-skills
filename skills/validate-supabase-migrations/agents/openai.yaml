@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Supabase Migrations"
+  short_description: "Validate Supabase migrations in an isolated local stack"
+  default_prompt: "Use $validate-supabase-migrations to validate this repository’s complete Supabase migration chain and report evidence without touching production."

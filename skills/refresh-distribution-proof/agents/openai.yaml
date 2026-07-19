@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refresh Distribution Proof"
+  short_description: "Rebuild and verify cross-platform release proof"
+  default_prompt: "Use $refresh-distribution-proof to rebuild distribution artifacts and refresh trustworthy device evidence."

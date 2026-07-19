@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Durable Outbox Delivery"
+  short_description: "Audit durable outbox retries and concurrency"
+  default_prompt: "Use $validate-durable-outbox-delivery to audit this outbox and delivery workflow for durability, retry isolation, and concurrency safety."

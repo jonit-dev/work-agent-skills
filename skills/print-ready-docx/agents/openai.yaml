@@ -1,0 +1,4 @@
+interface:
+  display_name: "Print-ready DOCX"
+  short_description: "Crie DOCX profissionais, compatíveis e imprimíveis"
+  default_prompt: "Use $print-ready-docx para transformar este Markdown em um DOCX profissional pronto para impressão."
