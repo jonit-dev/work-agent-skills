@@ -52,6 +52,10 @@ This repository is intentionally public-safe:
 - `skills/github-code-review/`
 - `skills/codebase-inspection/`
 
+### Skill maintenance
+
+- `skills/skill-optimizer/` — audit routing noise, description bloat, overlapping triggers, and missing progressive disclosure without automatically deleting or merging skills.
+
 ## How to use
 
 Copy the skill folder you need into your agent's skills directory, or reference the `SKILL.md` content directly in your agent/session.
