@@ -20,7 +20,22 @@ PATTERNS = {
     "private_key": re.compile(r"-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----"),
     "local_home_path": re.compile(r"/home/joao\b|/Users/joao\b", re.I),
     "personal_phone": re.compile(r"\b778\D{0,3}846\D{0,3}7427\b"),
-    "private_terms": re.compile(r"\b(SADA|Insight|Definya|WealthLens|personal-life|Xero|Sarah|Thea|coldstartlabs)\b", re.I),
+    # Unambiguous private identifiers: match regardless of case.
+    "private_terms": re.compile(r"\b(SADA|Definya|WealthLens|personal-life|Xero|coldstartlabs)\b", re.I),
+    # Words that are also ordinary English or common placeholder names. Matched
+    # case-sensitively so "key insight" does not masquerade as the company
+    # "Insight", and reviewed against BENIGN below so mockup personas do not
+    # drown out real findings.
+    "ambiguous_terms": re.compile(r"\b(Insight|Sarah|Thea)\b"),
+}
+
+# Known-benign occurrences: fictional personas in UI mockups and documentation
+# headings. Each entry is (path suffix, matched value). Keep this list short and
+# justify every addition in the PR that introduces it.
+BENIGN = {
+    ("skills/last30days/README.md", "Sarah"),          # mockup greeting copy
+    ("skills/taste-skill/SKILL.md", "Sarah"),          # named as a banned generic persona
+    ("skills/humanizer/SKILL.md", "Insight"),          # "Key Insight" callout heading
 }
 
 hits = []
@@ -34,6 +49,9 @@ for path in ROOT.rglob("*"):
         for m in pat.finditer(text):
             value = m.group(0)
             if value in ALLOW:
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            if (rel, value) in BENIGN:
                 continue
             line = text.count("\n", 0, m.start()) + 1
             hits.append((str(path.relative_to(ROOT)), line, name, value[:80]))

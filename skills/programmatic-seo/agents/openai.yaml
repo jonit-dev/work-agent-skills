@@ -1,0 +1,6 @@
+interface:
+  display_name: "Programmatic SEO"
+  short_description: "Scale SEO pages with quality gates"
+  default_prompt: "Use $programmatic-seo to plan a safe rollout for scalable landing pages."
+policy:
+  allow_implicit_invocation: true

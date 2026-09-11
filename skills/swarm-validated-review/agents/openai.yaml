@@ -1,0 +1,7 @@
+interface:
+  display_name: "Swarm Validated Review"
+  short_description: "Parallel agents with manager review"
+  default_prompt: "Use $swarm-validated-review to investigate this task with specialist agents and a skeptical manager review."
+
+policy:
+  allow_implicit_invocation: true

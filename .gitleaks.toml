@@ -1,0 +1,36 @@
+# gitleaks config for a public skills repo.
+# Skills are documentation, so example credentials are expected and must not
+# fail the build. Real credentials must.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "personal-home-path"
+description = "Hardcoded personal home directory leaks the author's username"
+# RE2 has no lookahead; generic names are excluded via the allowlist below.
+regex = '''/(home|Users)/[a-z][a-z0-9_-]{2,}/'''
+tags = ["privacy"]
+
+[[rules]]
+id = "ntfy-topic"
+description = "Hardcoded ntfy topic acts as a shared secret"
+regex = '''ntfy\.sh/[A-Za-z0-9_-]{8,}'''
+tags = ["privacy"]
+
+[allowlist]
+description = "Documentation placeholders, not real secrets"
+regexes = [
+  '''/(home|Users)/(runner|user|username|you|youruser|me|dev|app|node|ubuntu|root)/''',
+  '''(?i)(your|example|placeholder|dummy|fake|redacted|changeme|xxx+)[-_]?(api)?[-_]?(key|token|secret|password)''',
+  '''sk_live_abc123''',
+  '''actual-token-here''',
+  '''YOUR/WEBHOOK/URL''',
+  '''\$\{?\{?\s*(secrets|env|vars)\.''',
+  '''(process\.env|os\.environ|os\.getenv)''',
+  '''-----BEGIN [A-Z ]*PRIVATE KEY-----\s*$''',
+]
+paths = [
+  '''(?i)LICENSE''',
+  '''\.gitleaks\.toml$''',
+]
