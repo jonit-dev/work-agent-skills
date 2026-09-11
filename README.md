@@ -1,7 +1,7 @@
 # Agent Skills
 
 Reusable skills for AI coding agents — Claude Code, Codex, and anything else that
-reads a `SKILL.md`. 68 skills covering planning, execution, review, research,
+reads a `SKILL.md`. 69 skills covering planning, execution, review, research,
 and release validation.
 
 This repository is public-safe by construction: no credentials, no personal
@@ -35,6 +35,7 @@ and symlink from each agent's directory into it.
 | --- | --- |
 | `prd-creator` | Create implementation-ready PRDs with complexity scoring, phases, and verification plans |
 | `prd-executor` | Execute a PRD by decomposing phases into dependency-aware parallel workstreams |
+| `prd-manager` | Report, audit and archive a directory of PRDs without reading them |
 | `writing-plans` | Write practical implementation plans for software changes |
 | `implementation-plan` | Turn a request into a sequenced, reviewable plan |
 | `implementation-notes` | Keep a running record of decisions made during a build |
