@@ -87,15 +87,11 @@ function main() {
   );
 
   add(
-    "PRD named in the branch or body but not the title",
+    "PRD named in the branch but not the title",
     "put the PRD id in the title — it is how a reviewer finds the plan",
-    prs
-      .filter((pr) => {
-        const inTitle = idsIn(pr.title).length > 0;
-        const elsewhere = idsIn(`${pr.headRefName} ${pr.body ?? ""}`).length > 0;
-        return !inTitle && elsewhere;
-      })
-      .map(label),
+    // Only the branch counts as evidence of ownership: a body may cite many PRDs as
+    // examples or dependencies without the PR belonging to any of them.
+    prs.filter((pr) => idsIn(pr.title).length === 0 && idsIn(pr.headRefName).length > 0).map(label),
   );
 
   const byPrd = new Map();
