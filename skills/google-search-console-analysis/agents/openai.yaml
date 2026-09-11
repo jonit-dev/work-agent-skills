@@ -1,0 +1,6 @@
+interface:
+  display_name: "Google Search Console Analysis"
+  short_description: "Analyze GSC SEO performance data"
+  default_prompt: "Use $google-search-console-analysis to find SEO opportunities from GSC data."
+policy:
+  allow_implicit_invocation: true

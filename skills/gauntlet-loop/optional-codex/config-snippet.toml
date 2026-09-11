@@ -1,0 +1,5 @@
+# Merge this into .codex/config.toml or ~/.codex/config.toml if you want an explicit concurrency cap.
+# Start conservatively; multi-agent loops can consume substantially more tokens.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 6

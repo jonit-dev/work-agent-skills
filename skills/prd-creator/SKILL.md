@@ -1,240 +1,158 @@
 ---
 name: prd-creator
-description: Use when turning a feature request into an implementation-ready PRD/spec. Produces explicit plans with complexity scoring, integration points, phased delivery, and verification checkpoints.
-version: 1.0.0
-author: Work Agent Skills
+description: Guides creation of comprehensive Product Requirement Documents (PRDs) for software projects through structured questioning and validation, then generates implementation task lists in JSON format. Use when users want to document a software idea, create specifications for development, plan a new application feature/bug, or break down requirements into actionable tasks. Transforms ideas into implementation-ready documents with verifiable pass criteria.
 license: MIT
 metadata:
-  hermes:
-    tags: [prd, planning, architecture, implementation-plan, verification]
-    related_skills: [prd-executor, writing-plans, test-driven-development, systematic-debugging]
+  author: pageai
+  version: '1.0.1'
+  tags: prd, product requirements, software development, documentation, task generation
+  website: https://pageai.pro/blog/long-running-ai-coding-agents-ralph-loop#step-2-write-your-requirements
 ---
 
-# PRD Creator
+# PRD Creation Assistant
+
+Transform software ideas into comprehensive PRDs and actionable implementation tasks through a two-part process.
 
 ## Overview
 
-You are a Principal Software Architect. Your mission is to produce an implementation plan so explicit that an engineer can implement it without guessing, then define disciplined verification checkpoints.
+This skill helps beginner-level developers.
 
-The output should be a PRD / implementation spec, not a vague plan. It must identify the exact integration points, files likely to change, test strategy, risks, and user-visible outcomes.
+1. Receive an implementation description from the user
+2. Create detailed PRD documents through structured questioning
+3. Verify implementation prerequisites, including access, MCPs, docs, env variables, and test users
+4. Generate implementation task lists in JSON format for developers
+5. Write an overall description of the project. An executive summary that gives a high level overview of the app and its main features.
 
-## When to Use
+### Part 1: Implementation Description
 
-Use this skill when:
+You will receive a lacking implementation description from the user.
+The main goal is to comprehend the intent and think about the larger architecture and a robust way to implement it, filling in the gaps.
 
-- A feature request needs to become an implementation-ready PRD.
-- A task is complex enough that coding immediately would risk dead code, unclear wiring, or missing tests.
-- You need to hand work to another agent/engineer with minimal ambiguity.
-- You need a plan that can be executed phase-by-phase and verified after each phase.
+### Part 2: PRD Creation
 
-Do not use this skill for:
+**File**: [PRD.md](PRD.md)
 
-- Tiny one-file fixes with obvious behavior.
-- Pure research notes with no implementation target.
-- Legal/HR/business documents that are not software implementation specs.
+You will need to ask clarifying questions to get a clear understanding of the implementation.
 
-## Step 0: Complexity Assessment
+**When to use**: User wants to document a software idea or create feature specifications
 
-Before writing any plan, determine complexity level:
+**What it does**:
+- Guides structured questioning to gather all requirements
+- Verifies project prerequisites before PRD finalization
+- Creates/updates `.env.local` with placeholder values only
+- Creates executive summary for validation
+- Researches competitive landscape
+- Generates comprehensive PRD.md with:
+  - App overview and objectives
+  - Target audience
+  - Success metrics and KPIs
+  - Competitive analysis
+  - Core features and user flows
+  - Technical stack recommendations
+  - Prerequisites and access
+  - Security considerations
+  - Assumptions and dependencies
 
-```text
-COMPLEXITY SCORE (sum all that apply):
-+1  Touches 1-5 files
-+2  Touches 6-10 files
-+3  Touches 10+ files
-+2  New system/module from scratch
-+2  Complex state logic / concurrency
-+2  Multi-package changes
-+1  Database schema changes
-+1  External API integration
-```
+**Process**:
+1. Ask clarifying questions using `AskUserQuestion` tool
+2. Verify prerequisites and create/update `.env.local` placeholders
+3. Create executive summary for user approval
+4. Research competition via WebSearch
+5. Generate complete PRD
+6. Iterate based on feedback
 
-- 1-3: LOW — minimal plan; skip sections marked MEDIUM/HIGH.
-- 4-6: MEDIUM — standard plan; include all core sections.
-- 7+: HIGH — full plan with explicit checkpoints after every phase.
+**Read [PRD.md](PRD.md) for complete instructions.**
 
-Start the plan with:
+---
 
-```markdown
-Complexity: [SCORE] → [LOW/MEDIUM/HIGH] mode
-```
+### Part 3: Implementation Task Generation
 
-## Pre-Planning Checklist
+**File**: [JSON.md](JSON.md)
 
-Do this before writing the PRD:
+You will need to analyze the completed PRD and generate a comprehensive task list in JSON format.
 
-1. **Explore:** Read relevant files. Never guess. Reuse existing code and project patterns.
-2. **Verify:** Identify existing utilities, schemas, helpers, routes, services, tests, and config.
-3. **Impact:** List files touched, features affected, and risks.
-4. **Clarify:** Ask only when ambiguity changes implementation or verification.
-5. **Integration points:** Identify exactly where and how the new code will be called.
-6. **UI counterparts:** For user-facing features, plan the full UI path, not only backend code.
+**When to use**: After PRD is complete and approved, or user requests task breakdown
 
-## Integration Points Checklist
+**What it does**:
+- Analyzes the completed PRD
+- Generates `TASK-1` as mandatory prerequisite verification
+- Generates a complete list of implementation tasks in JSON format, covering all features and requirements from the PRD
+- Keeps the tasks small and manageable
+- Categorizes tasks by type (functional, ui-ux, api-endpoint, security, etc.)
+- Defines verification ('pass') steps for each task
+- Creates developer-ready checklist
 
-Before writing a final plan, answer:
+**IMPORTANT**:
+- Each task should be simple enough to be completed in maximum 10 minutes.
+- If a task is too complex, it should be split into smaller tasks.
 
-```markdown
-**How will this feature be reached?**
-- [ ] Entry point identified: [route, event, cron, CLI command, UI action]
-- [ ] Caller file identified: [file that invokes the new behavior]
-- [ ] Registration/wiring needed: [router, handler, menu, scheduler, dependency injection]
+**Read [JSON.md](JSON.md) for complete instructions.**
 
-**Is this user-facing?**
-- [ ] YES → UI components/pages/modals listed
-- [ ] NO → Internal/background trigger explained
+## Part 4: Overall Description
 
-**Full user/system flow:**
-1. User/system does: [action]
-2. Triggers: [code path]
-3. Reaches new feature via: [specific connection point]
-4. Result appears in: [UI/API/log/output/state]
-```
+You will need to read the completed PRD and generate an overall description of the project in `PROJECT_ROOT/.agent/prd/SUMMARY.md`.
 
-If this checklist cannot be completed, the design is incomplete.
+The description should be short, concise and contain:
+- An overall description of the project
+- The main features of the app
+- Key user flows
+- A short list of key requirements
 
-## PRD Structure
+## Quick Start
 
-### 1. Context
+**If user wants to create a PRD:**
+1. Read [PRD.md](PRD.md)
+2. Follow the PRD creation workflow
+3. Verify prerequisites and create/update `.env.local` with placeholder values only
+4. If needed, update the overall description [SUMMARY.md](SUMMARY.md)
+5. After PRD completion, ask: "Would you like me to generate implementation tasks? See Part 2."
 
-- **Problem:** One-sentence problem statement.
-- **Goal:** What success looks like.
-- **Non-goals:** What this PRD intentionally excludes.
-- **Files analyzed:** Paths inspected.
-- **Current behavior:** 3-5 bullets.
+**If user wants implementation tasks for an existing PRD:**
+1. Read [JSON.md](JSON.md)
+2. Read the PRD file
+3. Generate comprehensive task list in JSON format, starting with `TASK-1` prerequisite verification
+4. Save as `tasks.json`
 
-### 2. Solution
+**If user wants both:**
+1. Complete PRD creation first [PRD.md](PRD.md), including prerequisite verification and `.env.local` placeholders
+2. Get user approval on PRD
+3. If needed, update the overall description [SUMMARY.md](SUMMARY.md)
+4. Proceed to generate implementation tasks [JSON.md](JSON.md)
 
-- **Approach:** 3-5 bullets explaining the chosen solution.
-- **Integration points:** Where the feature is wired in.
-- **Key decisions:** Framework/library choices, error handling, reuse of existing utilities.
-- **Data changes:** Schemas, migrations, storage, or `None`.
-- **Risks:** Technical, product, migration, security, performance.
+**If a user want to update the PRD:**
+1. Read [PRD.md](PRD.md)
+2. Update the PRD
+3. Save as `PRD.md`
+4. If needed, update the overall description [SUMMARY.md](SUMMARY.md)
+5. Ask user if they want to generate implementation tasks
 
-For MEDIUM/HIGH complexity, include a diagram:
+**If a user want to update the implementation tasks:**
+1. Read [JSON.md](JSON.md)
+2. Update the implementation tasks
+3. Save as `tasks.json`
+4. Ask user if they want to update the PRD again
 
-```mermaid
-flowchart LR
-    User --> EntryPoint --> Service --> Store[(Data store)]
-```
+**If user wants to update both the PRD and the implementation tasks:**
+1. Update the PRD first [PRD.md](PRD.md)
+2. If needed, update the overall description [SUMMARY.md](SUMMARY.md)
+3. Update the implementation tasks [JSON.md](JSON.md)
+4. Save as `PRD.md` and `tasks.json`
 
-For MEDIUM/HIGH complexity, include a sequence flow:
+## After completion
 
-```mermaid
-sequenceDiagram
-    participant U as User/System
-    participant E as Entry Point
-    participant S as Service
-    participant D as Data Store
-    U->>E: action
-    E->>S: request
-    alt Error
-        S-->>E: typed error
-    else Success
-        S->>D: read/write
-        D-->>S: result
-        S-->>E: response
-    end
-```
+Ensure the required files are present:
+- PROJECT_ROOT/.agent/prd/PRD.md
+- PROJECT_ROOT/.agent/prd/SUMMARY.md
+- PROJECT_ROOT/.agent/tasks.json
 
-### 3. Execution Phases
+If they are not present, warn the user and ask if they would like to create any of them.
 
-Rules:
+## Important Constraints
 
-1. Each phase is one user-testable vertical slice.
-2. Prefer max 5 files per phase; split if larger.
-3. Every phase includes concrete tests.
-4. Every phase includes a checkpoint.
-5. Dependencies between phases are explicit.
-
-Phase template:
-
-```markdown
-#### Phase N: [Name] — [user-visible outcome]
-
-**Dependencies:** Phase(s) required first, or `None`.
-
-**Files:**
-- `path/file.ext` — what changes
-
-**Implementation:**
-- [ ] Step 1
-- [ ] Step 2
-
-**Tests required:**
-- `path/to/test.ext` — assertion(s)
-
-**Verification:**
-- Command: `...`
-- Expected result: `...`
-
-**Manual/user verification, if needed:**
-- Action: [what to do]
-- Expected: [what should happen]
-```
-
-### 4. Verification Strategy
-
-Philosophy: do not trust — verify. The feature is only done when executable proof shows it works.
-
-Use multiple verification types as appropriate:
-
-- Unit tests for pure logic.
-- Integration tests for services, persistence, and cross-module behavior.
-- API tests for endpoints/webhooks/auth flows.
-- E2E tests for full user journeys.
-- Manual verification for visual changes or external-service behavior that automation cannot fully cover.
-
-Every PRD must include:
-
-```markdown
-## Acceptance Criteria
-
-- [ ] User-visible behavior works as specified.
-- [ ] Existing behavior is preserved.
-- [ ] Errors are handled and tested.
-- [ ] Relevant tests pass.
-- [ ] Logs/metrics/security implications considered.
-- [ ] Documentation updated if user-facing behavior changes.
-```
-
-### 5. Checkpoint Protocol
-
-After each phase:
-
-1. Compare implementation against PRD requirements.
-2. Run the verification commands listed for the phase.
-3. Inspect diff for drift, dead code, missing wiring, and missing tests.
-4. Fix issues before moving to the next phase.
-
-For HIGH complexity, include explicit checkpoint blocks:
-
-```markdown
-## PHASE [N] CHECKPOINT
-
-Files changed: [list]
-Automated verification: [pass/fail + command]
-Manual verification needed: [yes/no]
-Drift from PRD: [none/list]
-Decision: [continue/fix/replan]
-```
-
-## Common Pitfalls
-
-1. **Dead code:** Planning a helper/service but not wiring it into the route, UI, CLI, cron, or caller.
-2. **Backend-only user feature:** Forgetting the UI path, empty states, loading states, and error states.
-3. **No negative tests:** Only testing happy paths.
-4. **Overlarge phases:** Phases that touch too many files and cannot be independently verified.
-5. **Fake verification:** Saying tests should pass without naming exact commands and expected results.
-6. **Ignoring project conventions:** Not reading existing patterns before choosing architecture.
-
-## Verification Checklist for the PRD Itself
-
-- [ ] Complexity score and mode are stated.
-- [ ] Relevant files were inspected.
-- [ ] Integration points are explicit.
-- [ ] User/system flow is complete.
-- [ ] Phases are vertical slices with dependencies.
-- [ ] Each phase has tests and verification commands.
-- [ ] Acceptance criteria are measurable.
-- [ ] Risks and non-goals are documented.
+- Do not generate code - focus on documentation and task specification
+- Use AskUserQuestion extensively in Part 1 to clarify requirements
+- Never write real secret values to PRD, tasks, chat, logs, or `.env.local`; use placeholder values and tell the user to fill real values manually
+- In Part 2, generate comprehensive task lists (50-200+ tasks for typical projects)
+- In Part 2, always generate `TASK-1` as prerequisite verification before feature work
+- Always initialize tasks with `"passes": false` - never mark tasks complete during generation
+- Use available tools: AskUserQuestion, WebSearch, Sequential Thinking, Read

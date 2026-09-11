@@ -1,0 +1,4 @@
+interface:
+  display_name: "XLSX Workbooks"
+  short_description: "Read, create, edit, and validate XLSX files"
+  default_prompt: "Use $xlsx-workbooks to create a polished, validated spreadsheet from my data."

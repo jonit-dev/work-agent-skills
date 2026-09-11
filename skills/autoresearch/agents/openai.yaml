@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autoresearch"
+  short_description: "Run autonomous, measurable experiment loops"
+  default_prompt: "Use $autoresearch to set up and run a bounded autonomous experiment loop for this measurable optimization task."
