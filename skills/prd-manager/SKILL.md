@@ -13,6 +13,7 @@ a screen, so an agent never loads hundreds of thousands of words to learn where 
 | Skill | Owns |
 |---|---|
 | [`prd-creator`](../prd-creator/SKILL.md) | writing the plan — phases, wiring ledger, tests, and the header fields below |
+| [`pr-manager`](../pr-manager/SKILL.md) | PR titles, body shape, and auditing the open PRs |
 | `prd-lifecycle` (a project skill, where one exists) | the rules for keeping a PRD honest |
 | **`prd-manager`** | the machinery: reporting, auditing and archiving those PRDs |
 
@@ -22,6 +23,7 @@ without it there is nothing emitting the fields below in the first place:
 ```bash
 ln -s "$PWD/skills/prd-creator" ~/.claude/skills/prd-creator
 ln -s "$PWD/skills/prd-manager" ~/.claude/skills/prd-manager
+ln -s "$PWD/skills/pr-manager"  ~/.claude/skills/pr-manager
 ```
 
 They interlock through the fields a PRD carries. `prd-creator` emits them, this skill reads
@@ -67,6 +69,12 @@ node $S/prd-audit.mjs --strict             # exit 1 on filing drift, for a gate
 node $S/prd-close.mjs <prd file>           # dry run: verify 100%, show the move
 node $S/prd-close.mjs <prd file> --yes     # rewrite the status line, git mv to done/
 node $S/prd-close.mjs <prd file> --reopen --reason "<what regressed>" --yes
+
+node $S/prd-pr.mjs --create-labels --yes   # once per repository
+node $S/prd-pr.mjs <prd file> --yes        # apply the progress label, after every push
+node $S/prd-pr.mjs --all --yes             # every open PRD that has a PR
+node $S/prd-body.mjs <prd file>            # the PR body, generated from the PRD
+node $S/prd-body.mjs <prd file> --pr <n> --yes
 ```
 
 ## What each one is for
@@ -90,6 +98,10 @@ touching the file.
 | blocked PRD with no reason folder | the shape is `BLOCKED/<short-reason>/<prd>.md`; a loose file names no blocker |
 | orphan evidence files | evidence nothing references — pure bloat |
 
+**`prd-pr.mjs`** applies the progress label to the PRD's pull request and reports when more
+than one open PR names the same PRD. **`prd-body.mjs`** generates that PR's body from the PRD —
+TL;DR, the phase checklists as they actually stand, and what is still open.
+
 **`prd-close.mjs`** is the archive move as one command. It refuses to close a PRD whose boxes are
 open — listing exactly which ones, with line numbers, so "what is left" needs no read — then
 updates **every** status field the PRD carries and `git mv`s the file:
@@ -109,13 +121,55 @@ record that the work landed.
 Status words are uppercase, matching the folder convention: `NOT STARTED`, `PROPOSED`, `PARTIAL`,
 `IN PROGRESS`, `BLOCKED`, `DONE`, `REOPENED`.
 
+## One PR per PRD
+
+**Exactly one pull request per PRD, opened as a draft before phase 1 starts. Never one PR
+per phase.**
+
+Phase-sized PRs are the mess this rule exists to prevent: one plan's evidence split across
+five branches, so no branch shows the whole picture, the review happens five times on partial
+context, and the PRD's progress stops being visible anywhere. Merging them in order becomes
+its own coordination problem, and the last one always carries a rebase nobody wanted.
+
+1. Cut the branch, open the **draft** PR with the PRD's checklist in the body
+   (`prd-body.mjs` generates it).
+2. Push each phase to that same PR as it lands.
+3. Tick the box in the PR body in the same push that ticks it in the PRD — a PR box ticked
+   ahead of the PRD is the same lie as a claimed gate.
+4. Re-apply the progress label on every push (`prd-pr.mjs`).
+5. When the last acceptance box is ticked, take the PR out of draft and `prd-close.mjs` the
+   PRD into `done/` **in that same PR**.
+
+A second PR is right only when the work is genuinely a different PRD — scope grew, so a new
+PRD cites the finished one. Never merely because the first PR got large. `prd-pr.mjs` reports
+when more than one open PR names the same PRD.
+
+## The progress label
+
+One label at a time, chosen by verified boxes — never by lines written or files touched.
+
+| Label | Meaning | Colour |
+|---|---|---|
+| `prd:25%` | phase 1 landed and verified | `#d73a4a` red |
+| `prd:50%` | half the phase boxes landed and verified | `#e36209` orange |
+| `prd:75%` | phases in, acceptance boxes still open | `#fbca04` yellow |
+| `prd:100% — ready` | every phase and acceptance box ticked; PR out of draft | `#0e8a16` green |
+
+`prd-pr.mjs` computes the bucket from the PRD and swaps the label on its PR, so a stale label
+cannot survive a push. Re-apply on every push: a stale label is worse than none, because it is
+read as a claim.
+
+Title conventions, the body shape and auditing the open PRs belong to the `pr-manager` skill.
+
 ## How to use it in a session
 
 1. `prd-board.mjs` before touching PRD work, and quote its numbers rather than re-deriving them.
 2. `prd-audit.mjs` when the docs feel bloated, or before a release. Fix the top categories first —
    they are ordered by actionability, not by count.
-3. `prd-close.mjs` in the commit that finishes the work, never as a later tidy-up.
-4. Never hand-count checkboxes or guess a percentage. If a number is wrong, the PRD's boxes are
+3. `prd-pr.mjs` and `prd-body.mjs` after every push, so the label and the PR body match the
+   PRD's boxes rather than the last time someone remembered.
+4. `prd-close.mjs` in the commit that finishes the work, never as a later tidy-up.
+5. Never hand-count checkboxes or guess a percentage. If a number is wrong, the PRD's boxes are
    wrong; fix the boxes.
 
 ## Token cost
