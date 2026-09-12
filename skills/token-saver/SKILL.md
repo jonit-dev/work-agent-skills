@@ -1,6 +1,6 @@
 ---
 name: token-saver
-description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a narrow-retrieval substitution policy, a verification ladder, a retry circuit breaker, and a delegation rule. Also installs and configures the setup it describes (global skills, token-efficient defaults for Claude Code and Codex) with full config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
+description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a narrow-retrieval substitution policy, a verification ladder, a retry circuit breaker, and a delegation rule. Also installs and configures the setup it describes (global skills, token-efficient defaults for Claude Code and Codex) with full config backup and one-command rollback. Ships two scripts: one that measures where a week's token budget actually went, and a hook that escalates to a more capable model when the agent keeps re-editing the same file. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
 ---
 
 # token-saver
@@ -61,12 +61,37 @@ diagnostic clue costs a whole extra turn, so cap output, do not blindfold yourse
 
 ## Retry circuit breaker
 
-> **Two failures with the same underlying cause: stop editing.**
+> **Two failures with the same underlying cause: escalate, do not retry.**
 
-Do not attempt a third fix. Re-state the assumption that must be wrong, escalate reasoning
-effort, or return to planning. The expensive pattern is edit → test → shallow diagnosis →
-edit → same test → shallower diagnosis, and it is how a cheap model outspends an expensive
-one.
+Do not attempt a third fix at the same capability level. State the assumption that must be
+wrong, then hand the problem to a more capable model or a higher-effort reasoning pass,
+carrying what was already tried and why each attempt failed. The expensive pattern is
+edit → test → shallow diagnosis → edit → same test → shallower diagnosis, and it is how a
+cheap model outspends an expensive one.
+
+The breaker escalates the capability applied to the task. It never abandons the task —
+a breaker that stops work converts a token problem into an unfinished-work problem.
+
+`scripts/escalate-on-churn.py` enforces this as a hook, because the rule is easy to write
+down and easy to ignore mid-loop. It counts edits per file per session and injects the
+escalation prompt at the 4th, 7th, 10th edit of the same file. It never blocks an edit and
+never fails a tool call on bad input. Wire it up in Claude Code's `settings.json`:
+
+```json
+"hooks": {
+  "PostToolUse": [
+    {
+      "matcher": "Edit|Write|NotebookEdit",
+      "hooks": [
+        {"type": "command", "command": "<skill dir>/scripts/escalate-on-churn.py"}
+      ]
+    }
+  ]
+}
+```
+
+Thresholds move with `CHURN_FIRST` and `CHURN_EVERY`. Pick them from your own measured edit
+churn rather than the defaults — see below.
 
 ## Delegation rule
 
@@ -184,6 +209,34 @@ the risk. The rest the script will not set at all.
 | RTK, Headroom, other output compressors | — | Measured *more* expensive end to end in two independent benchmarks. If you want one, A/B it on your own repository and count cache reads, cache writes and dollars — never "tokens compressed". |
 
 Full reasoning and sources: [references/evidence.md](references/evidence.md).
+
+## Measure before you tune
+
+Do not guess which rule on this page is costing you. `scripts/burn.py` reads the local
+session transcripts and reports where the budget actually went — read-only, no
+dependencies, no network.
+
+```bash
+scripts/burn.py                      # last 7 days
+scripts/burn.py 30                   # last 30 days
+```
+
+Read the output in this order:
+
+1. **Spend by context size.** Cost per turn scales with the context carried into it, so a
+   few very long turns can dominate a week. A large share above 300k means sessions are
+   never compacting: use a smaller context window, or start fresh sessions between
+   unrelated tasks. Compression cannot fix this.
+2. **Always-resident preamble.** Instructions, memory, skill catalog and tool schemas are
+   re-read on every single turn. Prune once and then leave it alone — reads bill at ~0.1x
+   base input, but rewriting the prefix costs ~1.25x across every session that follows.
+3. **Top sessions.** A session with a four-figure turn count and a peak near the window
+   limit is the one to split, not to compress.
+4. **Tool calls.** If duplicate reads or repeated identical commands are rare, output
+   compression has nothing to eat and is not your lever.
+
+The numbers are base-input-equivalent, not raw tokens, because raw counts overstate cheap
+cached reads and understate output.
 
 ## Verify it worked
 
