@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# token-saver: set up Serena, shared skills and token-efficient defaults for
+# token-saver: set up shared skills and token-efficient defaults for
 # Claude Code and Codex. Idempotent. Backs up every file it touches before
 # touching it, and can restore that backup with --rollback.
 set -euo pipefail
@@ -23,7 +23,7 @@ TRACKED=(
 BEGIN='<!-- token-saver:begin -->'
 END='<!-- token-saver:end -->'
 read -r -d '' LINE <<'EOF' || true
-Token discipline, every session: slice uncertain or cross-file work into a compact PRD with the `prd-creator` skill first and execute from that, rather than exploring and implementing in one context (`prd-manager` reports where PRDs stand); semantic retrieval (Serena) **replaces** raw exploration — never confirm a Serena result with grep or a whole-file read; run the smallest test that can falsify the current hypothesis; after two failures with the same cause, stop editing and re-plan. Full policy: `~/.agents/skills/token-saver/SKILL.md`.
+Token discipline, every session: slice uncertain or cross-file work into a compact PRD with the `prd-creator` skill first and execute from that, rather than exploring and implementing in one context (`prd-manager` reports where PRDs stand); retrieve the smallest range that answers the question and **never re-establish a fact you already have** — no confirming grep after a read that answered it; run the smallest test that can falsify the current hypothesis; after two failures with the same cause, stop editing and re-plan. Full policy: `~/.agents/skills/token-saver/SKILL.md`.
 EOF
 
 APPLY=0; AGGRESSIVE=0; ROLLBACK=0; VERIFY_ONLY=0
@@ -86,12 +86,6 @@ verify() {
       if v="$(codex_has "$t" "$k")"; then ok "codex ${t:+$t.}$k=$v"; else bad "codex ${t:+$t.}$k missing"; fi
     done
   else bad "$CODEX_DIR/config.toml missing"; fi
-
-  # Serena registered for both hosts.
-  jq -e '.mcpServers.serena' "$HOME/.claude.json" >/dev/null 2>&1 \
-    && ok "serena registered for claude-code" || bad "serena not registered for claude-code"
-  grep -q '^\[mcp_servers\.serena\]' "$CODEX_DIR/config.toml" 2>/dev/null \
-    && ok "serena registered for codex" || bad "serena not registered for codex"
 
   # Every skill link must resolve to a readable SKILL.md — a dangling symlink
   # looks installed in `ls` and is invisible to the agent.
@@ -165,32 +159,10 @@ else
   plan "back up 5 files to $BACKUP_ROOT/<timestamp>/ with a restore.sh"
 fi
 
-# --- 1. serena -------------------------------------------------------------
-head_ "1. Serena MCP"
-if ! command -v serena >/dev/null 2>&1; then
-  warn "serena not on PATH — install it first: https://github.com/oraios/serena"
-else
-  if jq -e '.mcpServers.serena' "$HOME/.claude.json" >/dev/null 2>&1; then
-    ok "claude-code already registered"
-  elif [ "$APPLY" = 1 ]; then
-    serena setup claude-code && did "serena setup claude-code"
-  else
-    plan "run: serena setup claude-code"
-  fi
-
-  if grep -q '^\[mcp_servers\.serena\]' "$CODEX_DIR/config.toml" 2>/dev/null; then
-    ok "codex already registered"
-  elif [ "$APPLY" = 1 ]; then
-    serena setup codex && did "serena setup codex"
-  else
-    plan "run: serena setup codex"
-  fi
-fi
-
-# --- 2. skills -------------------------------------------------------------
+# --- 1. skills -------------------------------------------------------------
 # repo/skills/<name> -> ~/.agents/skills/<name> -> {~/.claude,~/.codex}/skills/<name>
 # One shared copy, so an update to the checkout lands in both agents at once.
-head_ "2. Skills (both agents)"
+head_ "1. Skills (both agents)"
 link() { # link <target> <linkname>
   local t="$1" l="$2"
   if [ -e "$l" ] || [ -L "$l" ]; then
@@ -208,7 +180,7 @@ for s in "${SKILLS[@]}"; do
 done
 
 # --- 3. the always-on line -------------------------------------------------
-head_ "3. Always-on instruction"
+head_ "2. Always-on instruction"
 inject() { # inject <file>
   local f="$1" tmp
   if [ -f "$f" ] && grep -qF "$BEGIN" "$f"; then
@@ -233,7 +205,7 @@ inject "$CLAUDE_DIR/CLAUDE.md"
 inject "$CODEX_DIR/AGENTS.md"
 
 # --- 4. config -------------------------------------------------------------
-head_ "4. Token-efficient defaults"
+head_ "3. Token-efficient defaults"
 
 set_claude_env() { # set_claude_env <key> <value>
   local f="$CLAUDE_DIR/settings.json" k="$1" v="$2" cur tmp
@@ -330,7 +302,7 @@ fi
 head_ "Next"
 if [ "$APPLY" = 1 ]; then
   say "1. Start a fresh session in either agent."
-  say "2. Confirm the token-saver line is in context and Serena tools are listed."
+  say "2. Confirm the token-saver line is in context."
   say "3. Re-check any time: $(basename "${BASH_SOURCE[0]}") --verify"
   say "4. Unhappy with anything: $(basename "${BASH_SOURCE[0]}") --rollback"
 else

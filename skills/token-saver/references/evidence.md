@@ -57,12 +57,13 @@ moving from conventional code search to realistic repository-state retrieval wit
 distractors. Doing well on "find this function" does not demonstrate efficient guidance of
 an autonomous repair trajectory.
 
-## Serena specifically
+## Semantic MCP servers (Serena): why this skill dropped it
 
-The mechanism is sound — symbol outlines, lookup, references, declarations,
-implementations, semantic replacement, instead of reading a 1,500-line file to understand
-one class. What is *not* established is that adding it to an already-capable harness lowers
-cost.
+**Status: removed, 2026-09-11.** This skill used to install Serena. It no longer does. The
+mechanism is sound — symbol outlines, lookup, references, declarations, implementations,
+semantic replacement, instead of reading a 1,500-line file to understand one class. What
+was never established is that adding it to an already-capable harness lowers cost. The
+measurements below, plus a local observation, decided it.
 
 | Test | Result |
 | --- | --- |
@@ -73,23 +74,36 @@ cost.
 
 Both negative results share one cause, and it is not a broken semantic server: Serena
 returned non-empty results on every attempted call. The trajectory around it duplicated the
-work. Hence the substitution rule.
+work. Hence the substitution rule, which survives the removal and is the actual product of
+this research.
 
-Where Serena is worth it:
+**Local observation, 2026-09-11.** On this machine, one day of Claude Code sessions:
+41 MCP server starts, 23 tool calls total, **0** in the repository being worked on, and a
+never-populated `.serena/cache`. The nudge hook could not correct it: for the `claude-code`
+client, `is_grep_call`/`is_read_call` in `serena/hooks.py` match only the literal `Grep` and
+`Read` tools, while the Codex and Grok branches also inspect shell commands — so a harness
+that reads with `cat` and searches with `grep` through Bash never increments the counter and
+never trips the 3-call threshold. Standing cost was ~10 idle processes and 22 deferred tool
+schemas; measured benefit was zero.
+
+The workload split that motivated it still holds — it just no longer needs a server:
 
 | Workload | Call |
 | --- | --- |
-| Symbol body, name already known | Serena |
-| All callers / references | Serena — its best fit |
-| Rename or refactor across files | Serena |
-| Inheritance and implementations | Serena, where the language backend supports it |
-| Fuzzy discovery ("where does auth happen?") | Repo map or `rg` first, then Serena |
+| Symbol body, name already known | `rg -n` for the line, then a ranged read |
+| All callers / references | `rg -n '<symbol>'` across the tree |
+| Rename or refactor across files | `rg -l` then a scripted edit, checked by the type checker |
+| Fuzzy discovery ("where does auth happen?") | Repo map or `rg` |
 | Tiny edit in a known file | Native Read/Edit |
 | Non-code config and docs | Native tools |
-| A fact Serena already established | **Nothing. Stop.** |
+| A fact already established | **Nothing. Stop.** |
 
-Confidence: academic support for precise budgeted retrieval — high. Serena for
-references/refactors — medium-high. Serena as an automatic cost reducer — **medium-low**.
+Confidence: academic support for precise budgeted retrieval — high. A semantic MCP server
+as an automatic cost reducer — **low**, and now measured locally at zero adoption.
+
+Reinstating it needs a measurement, not a preference: register it, work a week, and count
+tool calls in the target repository. Below a few dozen real calls it is paying rent for
+nothing.
 
 ## Compressors: the negative results
 
@@ -158,9 +172,11 @@ count and depth, peak working context, wall time, and **whether the intervention
 activated**. For retrieval experiments add: symbols queried, raw read bytes, semantic→grep
 duplicate lookups, time to first gold file, and the share of retrieved files actually used.
 
-The first experiment worth running is not "Serena vs vanilla". It is **Serena+substitution
-policy vs Serena alone** — the hypothesis being that restricting duplicate retrieval is
-worth more than providing semantic tools. Accept a change at a credible ≥10–15% reduction
+The first experiment worth running is not "semantic server vs vanilla". It is
+**substitution policy vs no policy, tooling held constant** — the hypothesis being that
+restricting duplicate retrieval is worth more than adding a retrieval tool. That is also
+the cheaper experiment, since the policy is a line of instruction and the server is an
+install. Accept a change at a credible ≥10–15% reduction
 in cost per solved task with no more than a 2–3 point drop in success. Below ~5%, prefer
 the simpler toolchain.
 

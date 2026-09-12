@@ -1,6 +1,6 @@
 ---
 name: token-saver
-description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a Serena-first retrieval substitution policy, a verification ladder, a retry circuit breaker, and a delegation rule. Also installs and configures the setup it describes (Serena MCP for Claude Code and Codex, global skills, token-efficient defaults) with full config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
+description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a narrow-retrieval substitution policy, a verification ladder, a retry circuit breaker, and a delegation rule. Also installs and configures the setup it describes (global skills, token-efficient defaults for Claude Code and Codex) with full config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
 ---
 
 # token-saver
@@ -18,36 +18,35 @@ So this skill has one rule, three ladders, and one setup script.
 
 ## The rule
 
-> **Semantic retrieval replaces lower-level exploration. It is never added on top of it.**
+> **A retrieval step replaces the one below it. It is never added on top of it.**
 
-The measured failure mode of "just install Serena" is an agent that calls a symbol tool,
-gets a correct answer, and then confirms the same fact with `rg` and a whole-file read.
-That arm used **+10.1% uncached input and +59.3% tool calls** against bare Codex — the
-semantic server worked fine; the trajectory around it did not.
+The measured failure mode is an agent that gets a correct answer from one tool, then
+confirms the same fact with `rg` and a whole-file read. The semantic-server arm that did
+this used **+10.1% uncached input and +59.3% tool calls** against bare Codex — the server
+worked fine; the trajectory around it did not. That result is why this skill no longer
+installs a semantic MCP server: see [references/evidence.md](references/evidence.md).
 
-Adding a retrieval tool only pays if it *removes* the reads it replaces.
+Any retrieval tool only pays if it *removes* the reads it replaces.
 
 ## Retrieval ladder
 
 Climb only as far as the question requires, then stop.
 
-1. **Symbol or path already known?** Go straight to Serena: `find_symbol`,
-   `find_referencing_symbols`, `find_implementations`, `get_symbols_overview`.
-2. **Owner unknown** ("where does auth happen?") — semantic lookup does not yet know what
-   to ask. Use repo map / `rg` / `glob` for discovery, then switch to Serena the moment a
-   symbol name appears.
-3. **Retrieve the smallest semantic unit that answers the question** — a symbol body, not
-   its file; references, not a grep of the whole repo.
-4. **After Serena establishes a fact, do not re-establish it.** No confirming `rg`, no
-   whole-file `Read`, no second index. This is the rule above, and it is the single
-   highest-value line in this skill.
-5. **Fall back to a raw read only for a named unresolved question** Serena could not
-   answer. Write the question down first; if you cannot name it, you do not need the read.
+1. **Symbol or path already known?** Read the range, not the file — `rg -n '<symbol>'`
+   for the definition line, then `sed -n 'A,Bp'` or `Read` with an offset and limit.
+2. **Owner unknown** ("where does auth happen?") — `rg` and `glob` for discovery. Name the
+   symbol first; a search you cannot name is exploration, not retrieval.
+3. **Retrieve the smallest unit that answers the question** — a function body, not its
+   file; `rg -l` to locate before `rg -n` to read; callers by name, not a repo-wide dump.
+4. **After a step establishes a fact, do not re-establish it.** No confirming `rg` after
+   a read that already answered, no second pass over the same file. This is the rule
+   above, and it is the single highest-value line in this skill.
+5. **Fall back to a whole-file read only for a named unresolved question.** Write the
+   question down first; if you cannot name it, you do not need the read.
 6. **Stop retrieving** once there is enough evidence to implement or verify safely.
 
-Exceptions, both real: tiny edits in a file you already have open, and non-code files
-(config, docs, markdown) — native `Read`/`Edit` beat semantic tools there, and calling
-Serena on a `.toml` is pure overhead.
+Exceptions, both real: tiny edits in a file you already have open, and small files where
+one read is cheaper than three searches — do not ladder for the sake of laddering.
 
 ## Verification ladder
 
@@ -135,28 +134,26 @@ snapshot restores by running its own `restore.sh`.
 
 What it does:
 
-1. **Serena** — `serena setup claude-code` and `serena setup codex`, skipped if already
-   registered.
-2. **Skills** — links `token-saver`, `prd-creator` and `prd-manager` into
+1. **Skills** — links `token-saver`, `prd-creator` and `prd-manager` into
    `~/.claude/skills/` and `~/.codex/skills/` from one shared checkout, so both agents read
    the same file and an update lands in both.
-3. **The always-on line** — appends one line to `~/.claude/CLAUDE.md` and
+2. **The always-on line** — appends one line to `~/.claude/CLAUDE.md` and
    `~/.codex/AGENTS.md`, between markers so re-runs replace rather than duplicate it:
 
    > Token discipline, every session: slice uncertain or cross-file work into a compact
    > PRD with the `prd-creator` skill first and execute from that, rather than exploring
-   > and implementing in one context (`prd-manager` reports where PRDs stand); semantic
-   > retrieval (Serena) **replaces** raw exploration — never confirm a Serena result with
-   > grep or a whole-file read; run the smallest test that can falsify the current
-   > hypothesis; after two failures with the same cause, stop editing and re-plan. Full
-   > policy: `~/.agents/skills/token-saver/SKILL.md`.
+   > and implementing in one context (`prd-manager` reports where PRDs stand); retrieve
+   > the smallest range that answers the question and **never re-establish a fact you
+   > already have** — no confirming grep after a read that answered it; run the smallest
+   > test that can falsify the current hypothesis; after two failures with the same cause,
+   > stop editing and re-plan. Full policy: `~/.agents/skills/token-saver/SKILL.md`.
 
    It names `prd-creator` and carries its rules inline on purpose. A skill that is merely *installed*
    self-activated **zero times in ten sessions** in JetBrains' evaluation of Ponytail —
    measured savings only appeared when the rules were force-injected into the prompt. An
    instruction that depends on being discovered is an instruction that does not run.
 
-4. **Config defaults** — the settings in the table below, and deliberately not the others.
+3. **Config defaults** — the settings in the table below, and deliberately not the others.
 
 ## Config: what gets set, and what gets refused
 
@@ -194,7 +191,7 @@ Full reasoning and sources: [references/evidence.md](references/evidence.md).
 scripts/setup-agents.sh              # re-run dry: every step should report "ok"
 ```
 
-Then, in a fresh session of either agent, confirm the always-on line is in context and that
-Serena tools are available. If a session calls Serena and then greps for the same symbol,
-the rule is not reaching the model — check that the line survived in `CLAUDE.md` /
-`AGENTS.md` rather than adding more instructions elsewhere.
+Then, in a fresh session of either agent, confirm the always-on line is in context. If a
+session reads a file and then greps for the same symbol, the rule is not reaching the model
+— check that the line survived in `CLAUDE.md` / `AGENTS.md` rather than adding more
+instructions elsewhere.
