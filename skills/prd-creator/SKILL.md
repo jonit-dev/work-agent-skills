@@ -5,372 +5,245 @@ description: Rigorous engineering planning and PRD implementation standards. Use
 
 # PRD Implementation Standards
 
-You are a **Principal Software Architect**. Your mission: produce an implementation plan **so explicit that a Junior Engineer can implement it without questions**, then execute it with disciplined checkpoints.
+Act as a Principal Software Architect. Produce a plan explicit enough to implement, then execute it on the shortest safe path to a verified correct result.
 
-When this skill activates: `Planning Mode: Principal Architect`
+Priority order:
 
----
+1. Protect safety, data, security, compatibility, and explicit user/repository constraints.
+2. Make the requested outcome actually work through its intended consumer path.
+3. Minimize elapsed time and token/tool/test cost together — remove ceremony, choose the cheapest sufficient proof, and never re-derive a fact already established or duplicate an equivalent check. Neither speed nor token thrift justifies weakening 1 or 2.
 
-## The Integration Litmus (read this before anything else)
-
-The dominant PRD failure mode is **not wrong code**. It is correct code that
-nothing calls. The implementation is real, the tests are green, the PRD is
-checked off — and the feature is absent from the running product.
-
-One question settles it:
-
-> **Delete the new code. Does something pre-existing break?**
->
-> If no existing test, no user flow, and no live code path notices its absence,
-> the work was never integrated — no matter how many gates are green.
-
-Second question, for any gate you are about to record as passing:
-
-> **Have I watched this gate fail?**
->
-> A gate that has never been red is not evidence. It may be uncollected,
-> self-comparing, or already satisfied by the code that existed before you
-> started.
-
-Every rule below exists to force both answers before a phase is called done.
+One obligation, one evidence record. Every additional check must cover a distinct failure mode. A faster path is better only when it gives the same required confidence. Repository instructions and user requirements take precedence. Planning-only requests authorize a plan, not implementation, deployment, or closure.
 
 ---
 
-## Step 0: Complexity Assessment (REQUIRED FIRST)
+## The Integration Litmus
 
-Before writing ANY plan, determine complexity level:
+> Through the intended entry point, can the consumer exercise the behavior, and what observable result distinguishes correct execution from a broken or bypassed implementation?
 
-```
-COMPLEXITY SCORE (sum all that apply):
-+1  Touches 1-5 files
-+2  Touches 6-10 files
-+3  Touches 10+ files
-+2  New system/module from scratch
-+2  Complex state logic / concurrency
-+2  Multi-package changes
-+1  Database schema changes
-+1  External API integration
-```
+A helper test alone does not establish integration. Trace the reachable consumer and assert the promised output or state. Registration needs invocation; a success envelope does not prove persistence, rendering, or delivery.
 
-| Score | Level  | Template Mode                                   |
-| ----- | ------ | ----------------------------------------------- |
-| 1-3   | LOW    | Minimal (skip sections marked with MEDIUM/HIGH) |
-| 4-6   | MEDIUM | Standard (all sections)                         |
-| 7+    | HIGH   | Full + mandatory checkpoints every phase        |
-
-**State at plan start:** `Complexity: [SCORE] → [LOW/MEDIUM/HIGH] mode`
+A new integration test through the real entry point is valid proof. Neither a pre-existing test failure nor an arbitrary edit to an existing file is required. Preserved regression behavior is useful evidence; not every passing gate needs a manufactured failure. Use the targeted controls in §6.
 
 ---
 
-## Pre-Planning (Do Before Writing)
+## Step 0: Complexity Assessment
 
-1. **Explore:** Read all relevant files. Never guess. Reuse existing code (DRY). Take a look on .env files for relevant config variables, so we can avoid hardcoding values. Avoid using them directly with process.env we generally use a config util to load them (env.ts?).
-2. **Verify:** Identify existing utilities, schemas, helpers.
-3. **Impact:** List files touched, features affected, risks.
-4. **Ask questions**: If unclear about requirements, clarify before planning with AskUserQuestion.
-5. **Integration Points (CRITICAL):** Identify WHERE and HOW new code will be called. New code that isn't connected to existing flows is dead code.
-6. **UI Counterparts:** For any user-facing feature, plan the complete UI integration (settings page, dashboard component, modal, etc.)
-7. **Incumbent Census (CRITICAL):** Find every implementation of this behavior that already exists. If the feature replaces something, name it now — you cannot plan a replacement you have not located.
+Score before planning; update only when scope or risk materially changes.
 
-### Integration Ledger (REQUIRED — the PRD's durable wiring owner)
+| Factor | Points |
+|---|---|
+| Implementation files: 0 / 1–5 / 6–10 / 11+ | 0 / 1 / 2 / 3; choose one |
+| New system/module | +2 |
+| Complex state or concurrency | +2 |
+| Crosses an independent build/release boundary | +2 |
+| Database schema change | +1 |
+| External API integration | +1 |
 
-Every PRD carries one table, near the top, with one row per new module,
-exported symbol, gate, or generated artifact. It is written at plan time with
-intent, and **filled in with real `file:line` during implementation**. A row
-still reading `TBD` at phase end means the phase is incomplete.
+Exclude tests, documentation, generated files, and the PRD from file counts. Two package directories are not necessarily separate build/release boundaries. Security boundaries, destructive migrations, and high-impact compatibility changes promote the mode to HIGH; record why.
 
-```markdown
-## Integration Ledger
+| Score | Mode | Process |
+|---|---|---|
+| 0–3 | LOW | Compact plan, ACs, affected checks, self-review. |
+| 4–6 | MEDIUM | Add diagrams where they clarify boundaries and one reviewer at substantive checkpoints when available. |
+| 7+ | HIGH | MEDIUM plus verification of named high-impact risks and required platforms. |
 
-| # | New thing | Live caller (`file:line`, non-test) | Replaces | Old path removed? | Negative control |
-|---|-----------|-------------------------------------|----------|-------------------|------------------|
-| 1 | `PortableSurface` material | `lib.rs:369` registers plugin; `map_world.rs:214` spawns | hand-written `native_ocean_water.wgsl` | deleted in Phase 5 | zeroing wave scale flattens the capture |
-| 2 | `POST /api/invoice` | `routes/index.ts:41` | `legacy/billingCron.ts` | now delegates | missing auth header returns 401 |
-```
+State `Complexity: <score> → <mode>; risk override: <reason or none>`. No minimum number of tests, diagrams, or agents. Manual/human gates follow the property being proved, not the complexity score.
 
-Rules that make the ledger real:
+---
 
-- **A test is not a caller.** The live caller must be reachable from a real
-  entry point: route, event, cron, CLI command, frame loop, render pass, build
-  step. If the only thing that touches the new code is its own test, it is dead.
-- **Registration counts as wiring, not as a caller.** Registering a plugin
-  without anything spawning/invoking it is still dead. Name both.
-- **If `Replaces` is non-empty, the old path must be deleted or reduced to a
-  thin delegation inside the same phase.** Two live implementations of one
-  behavior means the new one is dead by construction, and the old one keeps
-  serving users while every gate stays green.
-- **Every row needs a negative control** — see the Verification section.
+## Step 0.5: Can This PRD Close Here?
 
-### Reachability questions (answer before writing the plan)
+Give each acceptance criterion a lane and actor on its own line:
 
-```markdown
-**How will this feature be reached?**
-- [ ] Entry point: [route, event, cron, CLI command, frame loop, render pass]
-- [ ] Pre-existing file that will be EDITED to call it: [path]
-- [ ] Registration/wiring: [add route to router, register plugin, DI binding, menu item]
+| Lane | Meaning and action |
+|---|---|
+| `local` | Runnable by the agent in the current approved environment. Execute and record the result. |
+| `shared` | Reachable through CI, staging, a queue, or a scheduled runner. Name the job, triggering actor, required environment, and result reference. |
+| `owner` | Requires a named human's action or sign-off. Default is zero; retain only when necessary. Flag it in the header and record the expected result. |
+| `unreachable` | Required hardware, access, or actor is currently unavailable. Record the blocker; do not treat it as satisfied. |
 
-**Is this user-facing?**
-- [ ] YES → UI components required (list them)
-- [ ] NO → Internal/background feature (name the trigger)
+Check available tools and equivalent environments before declaring a blocker. A substitute counts only for the property it actually proves: a simulator cannot silently replace required physical-device evidence, nor a mock replace required live-service validation. State remaining gaps.
 
-**Full flow:**
-1. User/system does: [action]
-2. Triggers: [existing code path]
-3. Reaches new feature via: [the specific line you will add]
-4. Result observable in: [where the outcome shows up]
+Start approved shared checks when their inputs are ready and continue independent phases. Their results remain required for acceptance. Every `local` box being green does not imply that shared checks, implementation elsewhere, or the PRD itself are complete.
 
-**What does this replace?**
-- [ ] Nothing — genuinely new behavior (say why no incumbent exists)
-- [ ] Replaces: [path(s)] → removed/delegating in Phase [N]
-```
+The lane rule comes from a source-supplied audit across three unrelated repos (a native game framework, a TypeScript game API, and a CLI tool): 700+ PRDs and 240 rejected completion attempts. The criteria that stayed unticked were disproportionately the ones requiring evidence the author could not reach:
 
-**If you cannot complete this, the feature design is incomplete.** Do not
-proceed to phases with an unnamed caller.
+| Repo's out-of-reach thing | Share of OPEN PRDs | Share of CLOSED PRDs |
+|---|---|---|
+| physical device (native framework) | 40% | 17% |
+| e2e / live pilot run (game API) | 24% | 9% |
+| e2e / live run (its client) | 50% | 8% |
+| deploy / staging (game API client) | 53% | 23% |
+| hosted CI run, publish, release tag | 3-4% | 1% |
+
+Treat these figures as design evidence for the lane model, not as repository facts to re-prove during normal execution.
+
+For `unreachable` qualification work, split into a linked qualification PRD only when its scope is genuinely separable. During execution, moving an agreed AC requires authorization. A qualification dependency needed to satisfy this PRD remains completion-blocking; splitting or relabeling it never counts as verification.
+
+### Owner lane
+
+This skill does not authorize deploying, publishing, rotating credentials, or changing production. Keep those actions out of autonomous phase steps. A separate explicit request must use the applicable authorization/workflow; the lane itself grants no permission.
+
+For a required human gate, name the owner, action/result to confirm, and an applicable header flag: `POST-DEPLOY-EVALUATION-REQUIRED`, `POST-RELEASE-EVALUATION-REQUIRED`, or `POST-DEVICE-EVALUATION-REQUIRED`. Use the repository's equivalent for other human sign-offs. Keep the flag near the top; do not add it speculatively.
+
+Ask once at the end, after agent-executable work is verified; combine outstanding human gates into one request. While working, surface blockers in status updates without repeated action requests. Do not perform the owner action or approve it on their behalf. Record an owner result only from attributable confirmation/evidence. Pending owner acceptance keeps the PRD open.
+
+### Closability budget
+
+| Mode | Target maximum phases | Target maximum required boxes | Typical external gates |
+|---|---|---|---|
+| LOW | 2 | 8 | No speculative shared/owner gates. |
+| MEDIUM | 4 | 16 | At most one shared/qualification dependency; no speculative owner gate. |
+| HIGH | 6 | 24 | At most one shared dependency and one necessary, flagged owner gate. |
+
+These are planning budgets, not permission to remove required validation. Consolidate duplicate boxes or split genuinely independent scope first. If required coverage still exceeds a budget, preserve it and explain the exception; never weaken an AC, disguise several outcomes as an untestable box, or raise the tier merely to allow a human gate. Every box must establish a distinct required fact.
+
+The same source audit found more boxes on open PRDs than closed ones (7 vs 12 in one repo, 23 vs 31 in another, 30 vs 38 in a third), while PRDs that never closed carried 46, 54, and 67 boxes. That is why the budgets are binding planning pressure: over budget means consolidate duplicate proof or split independent scope, not silently add ceremony. Required facts still win over the budget.
+
+---
+
+## Pre-Planning
+
+For a new PRD, inspect repository instructions and naming/location conventions, then create the file with its header and phase outline before extended research. Fill it as findings land; do not overwrite an existing PRD or invent an ID that collides. For an existing PRD, update that file instead of creating a duplicate. The requested plan must exist on disk, not only in chat.
+
+Use targeted reads of entry points, incumbent implementations, utilities, schemas, tests, configuration loaders, and build/CI scripts. Batch independent discovery instead of exploring unrelated areas one after another. Discover real commands; never assume yarn, pnpm, cargo, or any other runner. Prefer configuration schemas and `.env.example`; never print or copy secrets into a PRD.
+
+Identify changed behavior, consumer/trigger, replacement paths, affected files, and risks. Resolve ambiguity from the repository first; ask only for decisions blocking correctness or authorization. State safe, reversible assumptions otherwise.
+
+User-facing does not necessarily mean a new screen: the access path may be a UI, CLI, API, or SDK. Internal work needs a runtime/build trigger. Record the full path: consumer action → entry point → implementation → observable result.
+
+### Integration Ledger
+
+Use one row per changed integration boundary or consumer-visible capability, not per helper, exported symbol, test, or gate. For no wiring change, write `Integration: unchanged — <reason>`.
+
+| Capability | Reachable consumer/trigger | Replaces / disposition | Evidence |
+|---|---|---|---|
+| Invoice creation | Checkout route → billing service; fill actual `file:line` | Legacy handler delegates | AC-1 / E1 |
+
+Fill actual non-test entry-point locations before the owning phase completes; do not invent line numbers. Public libraries and auto-discovered routes may use a consumer fixture or real request through their public entry point. A unit test importing an internal helper is not a live consumer.
+
+Delete or delegate obsolete paths. Temporary coexistence needs explicit migration/rollout scope, routing ownership, cutover/removal conditions, and tracked remaining work. Prove the new path runs rather than falling back. A removal required by this PRD cannot be postponed merely to close it.
 
 ---
 
 ## Plan Structure
 
-### 0. Header (REQUIRED — the fields tooling reads)
-
-Every PRD opens with these, directly under the title. They are not decoration: the
-`prd-manager` skill reads them to report progress, spot drift and archive the file,
-and a PRD missing them cannot be tracked by anything except a human reading it.
+Keep the repository's organization and these tooling-facing field names:
 
 ```markdown
 # PRD-<id> — <title>
 
 **Status:** NOT STARTED
 **Complexity:** <score> (<LOW|MEDIUM|HIGH>)
-**Owner:** <who>
-**Depends on:** <PRD ids, or nothing>
+**Owner:** <owner>
+**Depends on:** <PRD ids or None>
+
+## Context
+Problem, current behavior, relevant files inspected.
+
+## Solution
+Approach, consumer flow, reused components, data changes, risks.
+Architecture/sequence diagram only where it resolves real ambiguity.
+
+## Acceptance Criteria
+- [ ] AC-1 [local; actor: agent]: <consumer action → observable result, platform/threshold> — Evidence: pending.
+
+## Integration Ledger
+<Applicable rows, or Integration: unchanged — reason.>
+
+## Execution Phases
+#### Phase 1: <one working outcome>
+**Status:** NOT STARTED
+**ACs:** AC-1
+**Files:** <new/edited paths and purpose>
+**Implementation:** <steps, contracts, error handling>
+**Verification:** E1 — <command/flow, assertion, ACs and distinct risks covered>
+**Checkpoint:** pending
 ```
 
-`**Status:**` is uppercase and one of `NOT STARTED`, `PROPOSED`, `PARTIAL`,
-`IN PROGRESS`, `BLOCKED`, `DONE`, `REOPENED`. Move it as the boxes move — all boxes
-ticked and still reading `NOT STARTED` is drift, and the audit reports it.
+Add required owner flags near `**Status:**`; omit absent flags rather than filling them with `None`. Allowed status values: `NOT STARTED`, `PROPOSED`, `PARTIAL`, `IN PROGRESS`, `BLOCKED`, `DONE`, `REOPENED`. Keep status values exact; put explanations on a separate line:
 
-`prd-close.mjs` rewrites `**Status:**`, any `**Progress:**`, and each phase's own
-`**Status:**` when it archives the PRD, so keep those field names exactly.
-
-### 1. Context (Keep Brief)
-
-**Problem:** 1-sentence issue being solved.
-
-**Files Analyzed:** List paths inspected.
-
-**Current Behavior:** 3-5 bullets max.
-
-### 2. Solution
-
-**Approach:** 3-5 bullets explaining the chosen solution.
-
-**Architecture Diagram** (MEDIUM/HIGH complexity):
-
-```mermaid
-flowchart LR
-    Client --> API --> Service --> DB[(Database)]
+```markdown
+**Status:** PARTIAL
+**Blocker:** Implementation verified; awaiting <owner>'s <named check> for AC-3.
 ```
 
-**Key Decisions:**
-
-- [ ] Library/framework choices
-- [ ] Error-handling strategy
-- [ ] Reused utilities
-
-**Data Changes:** New schemas/migrations, or "None"
-
-### 3. Sequence Flow (MEDIUM/HIGH complexity)
-
-```mermaid
-sequenceDiagram
-    participant C as Controller
-    participant S as Service
-    participant DB
-    C->>S: methodName(dto)
-    alt Error case
-        S-->>C: ErrorType
-    else Success
-        S->>DB: query
-        DB-->>S: result
-        S-->>C: Response
-    end
-```
+Preserve `**Progress:**` where tooling uses it. Checkboxes are for required work/ACs, not examples, alternatives, or optional follow-ups. Reuse existing required checklists instead of creating parallel copies. The closure helper's parser is authoritative for syntax; inspect it when conventions are unclear.
 
 ---
 
 ## 4. Execution Phases
 
-**CRITICAL RULES:**
+Each phase delivers a coherent, testable vertical slice. Prefer roughly five implementation files or fewer, but do not fragment a working slice to satisfy a file cap. Documentation/refactor phases may prove correct consumption or preserved contracts rather than new UI behavior.
 
-1. Each phase = ONE user-testable vertical slice
-2. Max 5 files per phase (split if larger)
-3. Each phase MUST include concrete tests
-4. **Every phase must edit at least one pre-existing file.** A phase that only
-   adds new files has connected nothing. This is mechanical and non-negotiable.
-5. **Checkpoint after each phase** (automated ALWAYS required, manual ADDITIONAL for HIGH when needed)
+Phases are ordered by dependency, not by numbering: a dependent phase waits only for the prerequisite it actually needs, and independent phases with stable contracts and non-conflicting write surfaces may run in the same wave. Orchestrating that execution is `prd-executor`'s job, not this skill's.
 
-### Choose the hardest real subject first
+Prove capabilities on a production-representative subject exercising the hard requirements — not an easy toy. If an AC names an actual production subject, use that subject. An intermediate smaller fixture must list omitted requirements and the phase that closes each gap; final acceptance cannot retain those gaps.
 
-When a phase proves a new *capability* — an exporter, codec, adapter, parser,
-pipeline, migration — the subject it is proved on decides whether the capability
-is real. Proving it on the easiest available input produces a green PRD and a
-capability that collapses on contact with the thing it was built for.
+Implement scope, run selected affected checks, record evidence and integration locations, then perform the checkpoint. Reuse coverage; add or extend tests only for uncovered behavior or plausible regressions. Follow existing naming conventions.
 
-**Rule:** the earliest proving phase uses the **actual production subject** —
-the biggest, ugliest, most-featured real input the feature exists to serve.
-
-If you genuinely must start smaller, the phase must declare the debt inline:
+Store evidence once, on the owning AC or existing phase box. Reference it elsewhere:
 
 ```markdown
-**Proof subject:** motion blur (26 lines, postprocess, no scene inputs)
-**Real target:** ocean water (279 lines, world-space, control flow, cube sampling)
-**Requirements this subject does NOT exercise:** control flow, screen-space
-derivatives, vector-typed uniforms, MVP transform, cube textures
-**Phase that closes each gap:** Phase 4 (control flow, derivatives), Phase 5 (uniforms)
+- [x] AC-1 [local; actor: agent]: Invoice appears after checkout — E1: <actual command>, <passed/collected counts>, exit <code>; <tested source snapshot>, <environment>; asserts persisted invoice through checkout. Red: <cause, when required>.
+- [x] AC-2 [local; actor: agent]: Repeated checkout is idempotent — E1, assertion <test name>.
 ```
 
-**Never phrase an acceptance criterion so a simpler subject satisfies it.**
-"The exporter round-trips a shader" is satisfiable by a toy. "The ocean renders
-from the generated shader on both runtimes" is not. Write the second kind.
-
-### Phase Template
-
-```markdown
-#### Phase N: [Name] - [User-visible outcome in 1 sentence]
-
-**Status:** NOT STARTED
-
-**Files (max 5):** — at least one must already exist
-
-- `src/path/new.ts` - NEW: what it does
-- `src/path/existing.ts` - EDIT: now calls the above at line ~NN
-
-**Implementation:**
-
-- [ ] Step 1
-- [ ] Step 2
-
-**Wiring (the phase is not done without this):**
-
-- [ ] Caller edited: `path/existing.ts:NN` invokes the new code
-- [ ] Registration: [router / plugin / DI / schedule / menu entry]
-- [ ] Old path: [deleted | now delegates | n/a, new behavior]
-- [ ] Ledger rows filled: [#1, #2]
-
-**Tests Required:**
-| Test File | Test Name | Assertion | Negative control (must be observed red) |
-|-----------|-----------|-----------|------------------------------------------|
-| `src/__tests__/feature.spec.ts` | `should do X when Y` | `expect(result).toBe(Z)` | passes only with the new path live; fails when it is disabled |
-
-**Revert check:**
-
-- Disable/rename the new code → [which pre-existing test or flow breaks]
-
-**User Verification:**
-
-- Action: [what to do]
-- Expected: [what should happen]
-```
+Identify the tested revision including relevant uncommitted changes; a commit hash alone does not identify a dirty worktree. For shared evidence, link the actual run/artifact and relevant job result. Keep output concise, inspect failure details, and retain the useful artifact reference — not a full log dump or a separate report per phase unless tooling/user requirements need one. A tool exit code alone does not establish the asserted outcome.
 
 ---
 
 ## 5. Checkpoint Protocol
 
-After completing each phase, execute the checkpoint review.
+Self-verification is mandatory after every phase: compare the diff to ACs, inspect reachability and failure handling, then evaluate actual execution evidence. No checklist or reviewer verdict substitutes for running the selected checks.
 
-### Automated Checkpoint (ALL complexities - ALWAYS REQUIRED)
+LOW uses self-review. MEDIUM/HIGH use one `prd-work-reviewer` or equivalent at substantive checkpoints when available. An equivalent orchestrator review of the same scope satisfies this requirement; do not spawn a duplicate. If unavailable, perform and label self-review. An explicitly required independent review stays outstanding until actually completed.
 
-**Spawn the `prd-work-reviewer` agent** to perform automated review:
+Pass the reviewer the PRD path, phase/AC IDs, changed paths, tested snapshot, concise evidence, and unresolved risks. Use the harness's available delegation tool; do not assume a particular Task API exists.
 
-```
-Use Task tool with:
-- subagent_type: "prd-work-reviewer"
-- prompt: "Review checkpoint for phase [N] of PRD at [prd_path]"
-```
+Review the diff and supplied evidence first. Check AC alignment, reachable consumers, incumbent routing, required platforms, and assertion quality. Rerun only a named coverage gap, stale result, or suspected false positive. Report `PASS`, `NEEDS CORRECTION`, or `BLOCKED` with actionable locations. Do not run the full suite merely because you are the reviewer.
 
-The agent will:
-
-1. Compare implementation against PRD requirements
-2. Run verification commands (`yarn verify`, `yarn test`)
-3. Identify any drift from specifications
-4. Report corrections needed
-
-**Always include the integration audit in the prompt:**
-
-```
-Also audit integration, independent of whether tests pass:
-1. Integration Ledger: is every row filled with a real non-test file:line?
-2. Caller census: grep each new exported symbol — any non-test consumer?
-3. Did this phase edit at least one pre-existing file?
-4. Revert check: if the new code were removed, what pre-existing test or flow
-   would break? If nothing, report FAIL.
-5. Incumbent: is the replaced path deleted or delegating, or is it still live?
-6. Negative controls: was each new gate observed failing? Check for
-   uncollected test files, self-comparisons, and assertions the previous
-   commit already satisfied.
-Report FAIL on any of these even when the full suite is green.
-```
-
-**Continue to next phase only when agent reports PASS.**
-
----
-
-### Manual Checkpoint (HIGH complexity - ADDITIONAL to automated)
-
-For phases requiring manual verification IN ADDITION to automated checks (e.g., visual UI changes, external integrations):
-
-```
-## PHASE [N] COMPLETE - CHECKPOINT
-
-Files changed: [list]
-Tests passing: [yes/no]
-yarn verify: [pass/fail]
-
-**Manual verification needed:**
-1. [ ] [Specific test action → expected result]
-
-Reply "continue" to proceed to Phase [N+1], or report issues.
-```
-
-### When to Add Manual Checkpoint (in addition to automated)
-
-| Scenario                      | Checkpoint Type                |
-| ----------------------------- | ------------------------------ |
-| API/backend changes           | Automated only                 |
-| Database migrations           | Automated only                 |
-| Business logic                | Automated only                 |
-| UI visual changes             | Automated + Manual             |
-| External service integration  | Automated + Manual             |
-| Performance-sensitive changes | Automated + Manual             |
-
-**Automated is ALWAYS required.** Add manual when automated verification alone is insufficient.
+Fix findings, rerun affected checks, and review the correction/delta only. Independent reviewer findings whose fixes do not overlap may be handled concurrently; related findings stay with one root-cause investigation. Required shared/owner acceptance may remain pending while independent work continues; do not mark its ACs or owning phase DONE early. Do not request generic "reply continue" approvals after verified phases. Human checkpoints use the owner lane, not an additional checklist.
 
 ---
 
 ## 6. Verification Strategy
 
-### Philosophy: Don't Trust, VERIFY
+### Select checks by marginal value
 
-The goal is **proving things work**, not just "writing tests". Every feature must have concrete, executable proof that it behaves correctly. If you can't demonstrate it working, it doesn't work.
+Before adding any test or verification step, answer:
 
-**Core principle:** Code without verification is a liability. A feature is only "done" when you can show evidence it works in real conditions.
+> Which plausible failure does this catch that the selected checks do not?
 
-### Verification Types (Use Multiple)
+If none, omit it. Extend an existing test/fixture before creating a new harness. Select the cheapest reliable instrument at the relevant boundary. Distinct layers earn their cost by detecting distinct failures.
 
-| Type | When to Use | Example |
-|------|-------------|---------|
-| **Unit Tests** | Pure logic, utilities, transformers | `expect(calculatePrice(100, 0.1)).toBe(90)` |
-| **Integration Tests** | Service interactions, DB operations | Test service method with real/mocked DB |
-| **API Tests (curl/httpie)** | Endpoints, auth flows, webhooks | `curl -X POST /api/endpoint -d '{"data":"test"}'` |
-| **Playwright E2E** | User flows, UI behavior, full journeys | `page.click('button') → expect(page).toHaveURL('/success')` |
-| **Manual Verification** | Visual changes, external integrations | Screenshot comparison, third-party dashboard check |
+| Risk | Suitable evidence |
+|---|---|
+| Pure logic/validation | Focused unit tests and affected regressions. |
+| API/job/persistence wiring | Real-entry-point integration test asserting resulting state. |
+| UI interaction | Existing component/E2E flow; visual observation for properties assertions cannot establish. |
+| Native/rendering/export | Required target execution on representative inputs and observable output. |
+| Performance | Comparable measurements against the AC's workload, environment, and threshold. |
+| Docs/config/build tooling | Relevant parser, build, link, consumer, or smoke check; no dummy unit-test quota. |
 
-### Negative Controls (MANDATORY for every gate)
+One real-entry-point integration test may prove behavior, wiring, and regression safety together. Do not additionally require curl, a demo, or another E2E for the same property. A mocked helper test cannot claim that integration coverage; typechecking alone cannot prove runtime behavior.
 
-A gate you have never seen fail is not evidence. Before recording any gate as
-passing, break it on purpose and watch it go red. These are the mechanisms by
-which real gates passed while shipping nothing:
+### Minimum sufficient proof and the stop condition
+
+For each AC, choose the smallest evidence set that would reliably reject a broken implementation. Prefer the highest useful consumer boundary: one strong observation may cover behavior, wiring, persistence, and regression. Add another check only for a distinct plausible failure, needed failure localization, or a high-impact invariant the primary proof cannot establish. High-risk security, data, billing, concurrency, compatibility, recovery, or irreversible changes may therefore need complementary evidence; choose the cheapest *sufficient*, not merely the cheapest, proof.
+
+Stop verification when every in-scope AC has current evidence, the required consumer path is exercised, material changed risks are covered by checks capable of detecting them, required repository/user gates are green (or explicitly pending externally), and no observed failure, reviewer finding, or material uncertainty remains unresolved. Then stop adding tests, equivalent reruns, reviewers, or demos unless new information introduces a distinct risk or a requirement demands them. Run independent required checks concurrently when they do not contend for mutable resources.
+
+### Negative controls: targeted, not universal
+
+For new/changed behavior with an automated test harness, use test-first red → green. The red must arise from the missing behavior or bug, not an unrelated syntax/import/environment error. An already-observed valid red counts; do not disable the feature again for equivalent proof.
+
+When no valid red exists, use a safe targeted negative control for a distinct behavior claim that could pass with the implementation absent or bypassed. A control can cover several ACs only when the observed assertions actually distinguish them. Exercise the real caller for integration claims.
+
+No manufactured red for unchanged regression checks, lint/type/build checks, or behavior-preserving refactors whose contracts should pass before and after. Refactors still need evidence the new path is reached and the old path has the planned disposition.
+
+When one of these false-pass risks is plausible, use the matching detection method rather than adding a generic extra test:
 
 | Silent-pass mechanism | Negative control that catches it |
 |---|---|
@@ -381,229 +254,57 @@ which real gates passed while shipping nothing:
 | **Real implementation mocked out** | Assert the production path actually ran: a call count, a side effect, a log line emitted from the real code. |
 | **Assertion kind silently ignored** by the harness (unknown key, typo'd field) | Assert something you know is false and confirm the harness reports failure rather than skipping. |
 
-Record the control alongside the pass, in this form:
+These controls are conditional diagnostics, not a universal checklist. Use a row only when that silent-pass mechanism is plausible and the selected evidence does not already exclude it. An already-observed valid red still counts.
 
-- `should displace the wave field` — PASS; goes red when `wave_scale` is zeroed
-- `web/native WGSL byte-identical` — PASS; goes red when one side is patched by a byte
+Investigate specific false-pass risks: uncollected tests, self-comparisons, stale artifacts, ignored assertions, vacuous fixtures, and mocks bypassing production. Prefer runner/provenance output and existing coverage. Inject a deliberate failure only where cheaper inspection cannot establish collection or sensitivity. A call count alone does not prove the promised end state.
 
-**A pass with no observed red is reported as UNVERIFIED, not as PASS.**
+Temporary mutations must be isolated and reversible. Preserve user changes, restore the exact candidate, and rerun the affected check to green. Never mutate production, disable real security controls, or commit the negative control. When a required proof cannot run safely, leave that claim `UNVERIFIED` — not passed.
 
-### Detection methods that actually work
+### Reuse valid evidence
 
-Ranked by observed yield when auditing "green but not integrated" work. CI
-suites, PRD checklists, and `done/` placement have caught **none** of it — do
-not rely on them.
+Reuse evidence while its relevant code, dependencies, configuration, inputs, environment, and platform are unchanged and the observed state remains applicable. Later edits invalidate affected evidence, not every result in the PRD. CI evidence must match the candidate's relevant scope and show that required tests actually ran; a skipped/cancelled job is not a passing check.
 
-1. **Grep for a live caller.** For each new symbol, list non-test consumers. One
-   read-only pass over ten subsystems found ~30 unwired features.
-2. **Run the gate's assertion against an unmodified baseline.** If the untouched
-   starting state passes, the gate measures nothing.
-3. **Read the raw log/trace, not the verdict.** The verdict said 3/3 scenarios
-   pass; the effect log showed the same entity re-emitting `despawn` for 234
-   ticks and never entering the rendered set.
-4. **Drive the real transport/UI, then inspect the resulting state.** A tool
-   returning `ok, changed: true` had written an empty object.
-5. **Look at the output with your own eyes.** Six genre presets produced
-   indistinguishable arenas; all six automated metrics passed them.
+Run focused checks during iteration. Run required broader gates once at final verification unless an applicable matching result already exists; run earlier when risk warrants. Never weaken repository/user-required checks to meet a token budget. Do not rerun unrelated suites after status-only edits; verify affected links/metadata and honor required CI policy.
 
-### Phase Verification Template
-
-Each phase MUST include a **Verification Plan**:
-
-```markdown
-**Verification Plan:**
-
-1. **Unit Tests:**
-   - File: `tests/unit/feature.spec.ts`
-   - Tests: `should X when Y`, `should handle Z error`
-
-2. **Integration Test:**
-   - File: `tests/integration/feature.int.spec.ts`
-   - Tests: `should persist data correctly`, `should rollback on failure`
-
-3. **API Proof (curl command):**
-   ```bash
-   # Happy path
-   curl -X POST http://localhost:3000/api/feature \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"input": "test"}' | jq .
-
-   # Expected: {"success": true, "id": "..."}
-
-   # Error case
-   curl -X POST http://localhost:3000/api/feature \
-     -H "Content-Type: application/json" \
-     -d '{}' | jq .
-
-   # Expected: {"error": "Unauthorized", "code": 401}
-   ```
-
-4. **Playwright Verification:**
-   - File: `tests/e2e/feature.spec.ts`
-   - Flow: Login → Navigate → Action → Assert result
-
-5. **Integration Proof (required, and not satisfied by any test above):**
-   ```bash
-   # 1. Caller census — every new exported symbol has a non-test consumer
-   grep -rn "PortableSurface" --include=*.rs --include=*.ts | grep -v "/tests\?/" | grep -v ".spec." | grep -v ".test."
-   # Expected: at least one hit that is not the definition itself
-
-   # 2. Revert check — removing the new path must break something pre-existing
-   #    (rename the symbol / flip the flag off, then run the existing suite)
-   # Expected: a PRE-EXISTING test or flow fails
-
-   # 3. Incumbent check — the replaced path is gone or delegating
-   grep -rn "native_ocean_water" --include=*.rs
-   # Expected: no live references, or only a delegation
-   ```
-
-6. **Evidence Required:**
-   - [ ] All tests pass (`yarn test` / project equivalent)
-   - [ ] Each gate has an observed negative control (recorded red)
-   - [ ] curl commands return expected responses
-   - [ ] E2E test demonstrates full user flow
-   - [ ] Integration Proof commands produce the expected output (pasted, not summarized)
-   - [ ] `yarn verify` passes
-```
-
-### Verification Checklist by Feature Type
-
-**API Endpoint:**
-- [ ] Unit test for request validation
-- [ ] Integration test for business logic
-- [ ] curl command with expected response documented
-- [ ] Error cases tested (400, 401, 403, 404, 500)
-- [ ] Rate limiting verified (if applicable)
-
-**Database Change:**
-- [ ] Migration runs without error
-- [ ] Rollback works
-- [ ] Data integrity constraints tested
-- [ ] Query performance acceptable (EXPLAIN ANALYZE for complex queries)
-
-**UI Feature:**
-- [ ] Component renders correctly (unit/snapshot test)
-- [ ] User flow works E2E (Playwright)
-- [ ] Loading states handled
-- [ ] Error states handled
-- [ ] Responsive behavior verified
-
-**Background Job/Cron:**
-- [ ] Job executes successfully
-- [ ] Failure handling tested
-- [ ] Idempotency verified (safe to re-run)
-- [ ] Logs show expected output
-
-**Webhook/Integration:**
-- [ ] Incoming payload validated
-- [ ] Signature verification tested (if applicable)
-- [ ] Retry behavior documented
-- [ ] curl command to simulate webhook
-
-### Test Naming Convention
-
-`should [expected behavior] when [condition]`
-
-Examples:
-- `should return 401 when token is missing`
-- `should create user when valid data provided`
-- `should rollback transaction when payment fails`
-
-### Evidence Documentation
-
-For MEDIUM/HIGH complexity, include a **Verification Evidence** section in the PRD after implementation:
-
-```markdown
-## Verification Evidence
-
-### Phase 1: User Authentication
-- Unit tests: 12 passing (screenshot/output)
-- curl test: POST /api/auth/login returns JWT ✓
-- Playwright: Login flow completes in 2.3s ✓
-- yarn verify: PASS
-
-### Phase 2: Dashboard
-- Component tests: 8 passing
-- E2E: Dashboard loads with user data ✓
-- Performance: LCP < 2.5s ✓
-```
-
-**Remember: If you can't prove it works, it doesn't work.**
+Missing execution/access means `UNVERIFIED` or `BLOCKED`. Existing red CI is not a passing gate; use only an explicit authorized waiver process, never an invented exception.
 
 ---
 
-## 7. Acceptance Criteria
+## 7. Acceptance Criteria and Required Closure
 
-### Write criteria about the consumer, never about the artifact
+Write criteria about consumers and observable outcomes, not mere artifact existence: "invoice appears in billing after checkout," not just "endpoint returns 200." Compatibility, correct artifact consumption, security invariants, or documentation usability can also be valid outcomes.
 
-This is the single wording choice that decides whether a PRD can pass while
-shipping nothing. Artifact-scoped criteria are satisfied by code that exists;
-consumer-scoped criteria are only satisfied by code that runs.
+When every in-scope AC is implemented and verified, all required gates/reviews and completion-blocking dependencies are satisfied, and no required work remains, you MUST mark the PRD DONE and move it to the repository's `done/` location in the same implementation task. Do not stop at "ready to close" or merely recommend the move.
 
-| Artifact-scoped (rejected) | Consumer-scoped (required) |
-|---|---|
-| "the generated shader validates under naga" | "the ocean renders from the generated shader in both runtimes" |
-| "7 presets proved" | "each preset produces a playfield distinguishable from the bare starter" |
-| "the endpoint returns 200" | "the invoice appears in the user's billing list after checkout" |
-| "touch readers are implemented" | "dragging on a touch device moves the player" |
-| "the exporter round-trips a shader" | "the shader the product actually uses is exported and consumed" |
-| "a preset ships for this genre" | "this genre's reference capture matches within threshold" |
+This includes required `local`, `shared`, and `owner` evidence. An open owner check means `PARTIAL` with a separate blocker explanation, not `DONE`. Unreachable required qualification also blocks closure. "Code complete" is a qualified implementation statement, not completed acceptance.
 
-Litmus: could this criterion be checked green by a build that a user could not
-tell apart from the previous one? Then rewrite it.
+Never tick, delete, weaken, or relabel a required AC to make closure succeed. Not-applicable items need a factual scope explanation; changes to agreed requirements need authorization. Preserve the decision rather than falsely checking the item. Optional follow-ups do not block closure; unfinished required work does.
 
-### Never file a PRD as done with unchecked boxes
+Closure consumes existing evidence; it is not another test suite or review cycle.
 
-A PRD moved to `done/` with unresolved boxes makes the whole `done/` directory
-untrustworthy as a record. Either the box is checked with evidence, or the PRD
-stays open with the gap named.
+Reconcile existing AC/task boxes, phase statuses, `**Status:**`, and `**Progress:**` from recorded evidence. Required proof gaps and unresolved placeholders keep the PRD open.
 
-Binary done checks:
+Use the repository's `prd-manager` closure helper when available; inspect its usage and destination. For installations with this layout:
 
-- [ ] All phases complete
-- [ ] All specified tests pass
-- [ ] `yarn verify` passes
-- [ ] All automated checkpoint reviews passed (manual also passed if required)
-- [ ] UI exists for user-facing features (or explicitly marked internal-only)
+```sh
+node "$HOME/.claude/skills/prd-manager/scripts/prd-close.mjs" "<prd-path>" --yes
+```
 
-**Integration gates (a PRD with any of these unchecked is NOT done):**
+If the helper is unavailable, update fields and use `git mv` to the established done directory, or `done/` under the PRD root when no convention exists. Use a normal move for an untracked file or outside Git. Preserve filename/ID and never overwrite a collision. A helper rejection for unmet requirements is not permission to bypass it manually.
 
-- [ ] Integration Ledger has zero `TBD` cells; every live caller is a real non-test `file:line`
-- [ ] Every new exported symbol has at least one non-test consumer (caller census pasted)
-- [ ] Revert check passed: disabling the new code breaks a pre-existing test or flow
-- [ ] Every `Replaces` row's old path is deleted or delegating — no behavior has two live implementations
-- [ ] Every gate has a negative control that was observed failing
-- [ ] The capability was proved on the real production subject, or the remaining gaps are listed with their closing phase
+Verify the destination exists, the old path is gone, and status/phase/progress fields are accurate. Update affected board/index links and PR references. Use one relevant closure audit when provided; no unrelated repository-wide audit is required.
+
+Include the move/status/link changes in the finishing commit or PR when authorized. Do not merge or deploy merely to close a PRD. If the repository requires merge/release before DONE, retain the verified intermediate state until that gate is satisfied.
+
+Report verified implementation separately from incomplete archival if a move/status write fails. Final output names completed ACs, concise evidence, final PRD path — or the exact remaining gap. Never claim a move or successful run without observing it.
 
 ---
 
-## Quick Reference
+## Guardrails and Isolation Anti-Patterns
 
-### Vertical Slice (Good) vs Horizontal Layer (Bad)
+Do not ship orphan code, mocked-only integration proof, unread contracts, uncollected tests, self-comparisons, manufactured success, stale artifacts, vacuous fixtures, or success responses without the promised state change. Investigate concrete risks rather than adding another generic checklist.
 
-| Good Phase                       | Bad Phase            |
-| -------------------------------- | -------------------- |
-| One endpoint returning real data | All types and DTOs   |
-| One socket event working e2e     | All socket handlers  |
-| One button doing one action      | Entire backend layer |
-
-**Litmus test:** Can you describe it as "User does X → sees Y"?
-
-### Anti-Patterns
-
-- Implementing multiple phases without checkpoints
-- Phases with no user-testable outcome
-- "yarn tsc passes" as sole verification
-- Touching 10+ files in one phase
-- Skipping automated review when available
-- **Backend without UI** - user-facing features with no way for users to access them
-
-### Isolation Anti-Patterns
-
-These are the concrete diff signatures of "implemented but not integrated."
-Each one has shipped a fully green PRD that changed nothing for users. Scan the
-diff for them at every checkpoint.
+These are the concrete diff signatures of "implemented but not integrated." Scan the changed surface for the applicable signatures during self-review/checkpoint; do not mechanically prove every row when the diff cannot exhibit it. Finding one fails the affected phase until the wiring/evidence is corrected.
 
 | Smell | What it looks like in the diff |
 |---|---|
@@ -622,62 +323,4 @@ diff for them at every checkpoint.
 | **Envelope ≠ state** | The call returns success and the persisted state is unchanged — `changed: true` written next to an empty object |
 | **Pure function stands in for the loop** | The evidence harness calls the function directly; the frame loop / request path never does |
 
-**Rule:** finding any of these at a checkpoint fails the phase. Fix the wiring
-in the same phase — never log it as follow-up.
-
-## Closing the PRD
-
-Writing the plan is this skill. Tracking and closing it is `prd-manager`:
-
-```sh
-S=~/.claude/skills/prd-manager/scripts
-node $S/prd-board.mjs                   # where every PRD stands, without reading them
-node $S/prd-audit.mjs                   # drift: status disagreeing with boxes or folder
-node $S/prd-close.mjs <prd file> --yes  # stamp DONE, git mv to done/, in the finishing commit
-```
-
-`prd-close.mjs` refuses to close a PRD whose boxes are still open and lists exactly which
-ones — which is why the header and per-phase `**Status:**` fields above are mandatory.
-
----
-
-## Principles
-
-- **SRP, KISS, DRY, YAGNI** - Always
-- **Composition > inheritance**
-- **Explicit errors** - No silent failures
-- **Automated verification** - Let the agent catch drift
-
----
-
-## Checkpoint Agent Integration
-
-The `prd-work-reviewer` agent is your automated QA partner. It:
-
-1. **Reads the PRD** to understand requirements
-2. **Analyzes git diff** to see what changed
-3. **Verifies alignment** between implementation and spec
-4. **Runs verification** commands automatically
-5. **Reports drift** with specific corrections
-
-### Spawning the Agent
-
-After completing phase implementation:
-
-```typescript
-// Use Task tool to spawn the reviewer
-Task({
-  subagent_type: 'prd-work-reviewer',
-  prompt: `Review implementation checkpoint.
-    PRD path: docs/PRDs/feature-name.md
-    Phase: 2
-    Summary: Implemented user authentication endpoint`,
-  description: 'Review phase 2 checkpoint',
-});
-```
-
-### Handling Agent Feedback
-
-- **PASS**: Proceed to next phase
-- **NEEDS CORRECTION**: Fix identified issues, re-run checkpoint
-- **BLOCKED**: Escalate to user for manual intervention
+The measured audit figures in §0.5 are retained inline so this skill has no dangling `references/` dependency. They are source-supplied historical rationale; active execution rules remain the sections above.
