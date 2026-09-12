@@ -1,6 +1,6 @@
 ---
 name: token-saver
-description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a narrow-retrieval substitution policy, a verification ladder, a retry circuit breaker, and a delegation rule. Also installs and configures the setup it describes (global skills, token-efficient defaults for Claude Code and Codex) with full config backup and one-command rollback. Ships two scripts: one that measures where a week's token budget actually went, and a hook that escalates to a more capable model when the agent keeps re-editing the same file. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
+description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a retrieval policy, a verification ladder, a retry circuit breaker, and a delegation rule, plus the scripts that measure and enforce them. Installs and configures itself for Claude Code and Codex, with config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the token budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
 ---
 
 # token-saver
@@ -75,23 +75,16 @@ a breaker that stops work converts a token problem into an unfinished-work probl
 `scripts/escalate-on-churn.py` enforces this as a hook, because the rule is easy to write
 down and easy to ignore mid-loop. It counts edits per file per session and injects the
 escalation prompt at the 4th, 7th, 10th edit of the same file. It never blocks an edit and
-never fails a tool call on bad input. Wire it up in Claude Code's `settings.json`:
+never fails a tool call on bad input.
 
-```json
-"hooks": {
-  "PostToolUse": [
-    {
-      "matcher": "Edit|Write|NotebookEdit",
-      "hooks": [
-        {"type": "command", "command": "<skill dir>/scripts/escalate-on-churn.py"}
-      ]
-    }
-  ]
-}
-```
+`setup-agents.sh --apply` wires it into Claude Code's `settings.json` as a `PostToolUse`
+hook matching `Edit|Write|NotebookEdit`, and `--verify` checks it is still wired and still
+executable. The step is idempotent — re-running never appends a second copy — and
+`--rollback` removes it with the rest of the config.
 
-Thresholds move with `CHURN_FIRST` and `CHURN_EVERY`. Pick them from your own measured edit
-churn rather than the defaults — see below.
+This one is Claude Code only: Codex has no equivalent per-tool-call hook, so there the rule
+stays prose in `AGENTS.md`. Thresholds move with `CHURN_FIRST` and `CHURN_EVERY`. Pick them
+from your own measured edit churn rather than the defaults — see below.
 
 ## Delegation rule
 
@@ -216,9 +209,15 @@ Do not guess which rule on this page is costing you. `scripts/burn.py` reads the
 session transcripts and reports where the budget actually went — read-only, no
 dependencies, no network.
 
+It is agent-agnostic: Claude Code (`~/.claude/projects`) and Codex (`~/.codex/sessions`)
+are both auto-detected and reported together, so the comparison between them is the useful
+part. Adding a third agent is one entry in the script's `SOURCES` table.
+
 ```bash
-scripts/burn.py                      # last 7 days
+scripts/burn.py                      # last 7 days, every agent found
 scripts/burn.py 30                   # last 30 days
+scripts/burn.py --source codex       # one agent only
+scripts/burn.py --list-sources       # what is installed on this machine
 ```
 
 Read the output in this order:
@@ -236,7 +235,10 @@ Read the output in this order:
    compression has nothing to eat and is not your lever.
 
 The numbers are base-input-equivalent, not raw tokens, because raw counts overstate cheap
-cached reads and understate output.
+cached reads and understate output, and they are scaled by a rough per-model price ratio.
+A model with no known ratio is counted at 1.0 and listed under UNPRICED MODELS rather than
+silently billed as cheap — if that section is a large share of your spend, add the ratio to
+`MODEL_RATE` before trusting the percentages.
 
 ## Verify it worked
 
