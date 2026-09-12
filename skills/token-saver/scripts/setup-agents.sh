@@ -97,6 +97,14 @@ verify() {
     done
   done
 
+  # The circuit-breaker hook: wired, and the script still executable.
+  hookcmd="$HUB/token-saver/scripts/escalate-on-churn.py"
+  if jq -e --arg c "$hookcmd" '[.hooks.PostToolUse[]?.hooks[]?.command] | any(. == $c)' \
+       "$CLAUDE_DIR/settings.json" >/dev/null 2>&1; then
+    if [ -x "$hookcmd" ]; then ok "PostToolUse escalate-on-churn wired"
+    else bad "escalate-on-churn wired but not executable"; fi
+  else bad "PostToolUse escalate-on-churn not wired"; fi
+
   # The always-on line actually reached the files the agents read.
   for f in "$CLAUDE_DIR/CLAUDE.md" "$CODEX_DIR/AGENTS.md"; do
     grep -qF "$LINE" "$f" 2>/dev/null && ok "${f/#$HOME/\~} carries the line" \
@@ -220,6 +228,26 @@ set_claude_env() { # set_claude_env <key> <value>
   else plan "set claude $k=$v"; fi
 }
 
+set_claude_hook() { # wire the retry circuit breaker in as a PostToolUse hook
+  # The rule is easy to write down and easy to ignore mid-loop, so it ships as a
+  # hook rather than as prose. Idempotent: matched on the command path, so a
+  # re-run never appends a second copy.
+  local f="$CLAUDE_DIR/settings.json" cmd="$HUB/token-saver/scripts/escalate-on-churn.py" tmp
+  [ -f "$f" ] || { if [ "$APPLY" = 1 ]; then mkdir -p "$CLAUDE_DIR"; echo '{}' > "$f"; fi; }
+  if jq -e --arg c "$cmd" '[.hooks.PostToolUse[]?.hooks[]?.command] | any(. == $c)' \
+       "$f" >/dev/null 2>&1; then
+    ok "claude PostToolUse escalate-on-churn"; return
+  fi
+  if [ "$APPLY" = 1 ]; then
+    tmp="$(mktemp)"
+    jq --arg c "$cmd" '.hooks = ((.hooks // {}) | .PostToolUse = ((.PostToolUse // []) + [{
+         matcher: "Edit|Write|NotebookEdit",
+         hooks: [{type: "command", command: $c}]
+       }]))' "$f" > "$tmp" && mv "$tmp" "$f"
+    did "claude PostToolUse escalate-on-churn"
+  else plan "wire claude PostToolUse escalate-on-churn"; fi
+}
+
 set_codex() { # set_codex <table|""> <key> <toml-value>
   local f="$CODEX_DIR/config.toml"
   if [ "$APPLY" = 1 ]; then
@@ -265,6 +293,7 @@ codex_set_if_unset() { # <table|""> <key> <toml-value> <human-value>
 set_claude_env CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS 3
 set_claude_env ENABLE_TOOL_SEARCH true
 set_claude_env MAX_MCP_OUTPUT_TOKENS 12000
+set_claude_hook
 codex_set_if_unset ""       model_verbosity          '"low"'   low
 codex_set_if_unset ""       tool_output_token_limit  10000     10000
 codex_set_if_unset agents   max_concurrent_threads_per_session 3 3
