@@ -13,8 +13,11 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 /** "### Phase 2 — …" and the numbered "### 3. …" form used under an Implementation order heading. */
 const PHASE_HEADING = /^#{3,4}\s+(?:Phase\b|\d+\.\s)/iu;
 const ACCEPTANCE_HEADING = /^#{2,4}\s+Acceptance criteria\b/iu;
+/** A `## Blocked on` list and a `## Decisions` log hold no work: they are not progress. */
+const NOT_A_BOX = /^#{2,4}\s+(?:Blocked on|Blocked|Decisions)\b/iu;
 const ANY_HEADING = /^#{2,4}\s/u;
 const BOX = /^\s*[-*]\s+\[([ xX])\]/u;
+const BULLET = /^\s*[-*]\s+\S/u;
 const STATUS_LINE = /^\s*(?:[-*]\s+)?\*{0,2}status\b/iu;
 const PRD_FILE = /^PRD-[^/]*\.md$/iu;
 const PRD_ID = /^PRD-([A-Za-z0-9.-]*?\d[A-Za-z0-9.-]*?)-/u;
@@ -30,13 +33,18 @@ export function readSections(markdown) {
         ? "phase"
         : ACCEPTANCE_HEADING.test(line)
           ? "acceptance"
-          : "other";
-      current = { kind, ticked: 0, total: 0 };
+          : NOT_A_BOX.test(line)
+            ? "note"
+            : "other";
+      current = { blocked: kind === "note" && /^#{2,4}\s+Blocked/iu.test(line), bullets: 0, kind, ticked: 0, total: 0 };
       sections.push(current);
       continue;
     }
     const box = BOX.exec(line);
-    if (box === null) continue;
+    if (box === null) {
+      if (BULLET.test(line)) current.bullets += 1;
+      continue;
+    }
     current.total += 1;
     if (box[1] !== " ") current.ticked += 1;
   }
@@ -53,7 +61,13 @@ export function progressOf(markdown) {
   const phasesComplete = phases.filter((s) => s.ticked === s.total).length;
   const phaseBoxes = phases.reduce((sum, s) => sum + s.total, 0);
   const phaseBoxesTicked = phases.reduce((sum, s) => sum + s.ticked, 0);
-  const openBoxes = sections.reduce((sum, s) => sum + (s.total - s.ticked), 0);
+  // `## Blocked on` and `## Decisions` carry no boxes, so nothing left to do counts them.
+  const openBoxes = sections
+    .filter((s) => s.kind !== "note")
+    .reduce((sum, s) => sum + (s.total - s.ticked), 0);
+  const blockedOn = sections
+    .filter((s) => s.blocked === true)
+    .reduce((sum, s) => sum + s.bullets, 0);
 
   const ready =
     phases.length > 0 &&
@@ -72,6 +86,9 @@ export function progressOf(markdown) {
   return {
     acceptanceTicked,
     acceptanceTotal,
+    /** Nothing left that anyone in reach can do: the only open items are `## Blocked on`. */
+    blockedOnly: openBoxes === 0 && blockedOn > 0,
+    blockedOn,
     openBoxes,
     percent,
     phaseBoxes,

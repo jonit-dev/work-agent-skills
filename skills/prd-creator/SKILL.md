@@ -13,7 +13,7 @@ Priority order:
 2. Make the requested outcome actually work through its intended consumer path.
 3. Minimize elapsed time and token/tool/test cost together — remove ceremony, choose the cheapest sufficient proof, and never re-derive a fact already established or duplicate an equivalent check. Neither speed nor token thrift justifies weakening 1 or 2.
 
-One obligation, one evidence record. Every additional check must cover a distinct failure mode. A faster path is better only when it gives the same required confidence. Repository instructions and user requirements take precedence. Planning-only requests authorize a plan, not implementation, deployment, or closure.
+One obligation, one evidence record: every additional check must cover a distinct failure mode. Repository instructions and user requirements take precedence, and a planning-only request authorizes a plan, not implementation, deployment, or closure.
 
 ---
 
@@ -48,7 +48,7 @@ Exclude tests, documentation, generated files, and the PRD from file counts. Two
 | 4–6 | MEDIUM | Add diagrams where they clarify boundaries and one reviewer at substantive checkpoints when available. |
 | 7+ | HIGH | MEDIUM plus verification of named high-impact risks and required platforms. |
 
-State `Complexity: <score> → <mode>; risk override: <reason or none>`. No minimum number of tests, diagrams, or agents. Manual/human gates follow the property being proved, not the complexity score.
+State `Complexity: <score> → <mode>; risk override: <reason or none>`. There is no minimum number of tests, diagrams or agents, and human gates follow the property being proved, not the score.
 
 ---
 
@@ -60,46 +60,24 @@ Give each acceptance criterion a lane and actor on its own line:
 |---|---|
 | `local` | Runnable by the agent in the current approved environment. Execute and record the result. |
 | `shared` | Reachable through CI, staging, a queue, or a scheduled runner. Name the job, triggering actor, required environment, and result reference. |
-| `owner` | Requires a named human's action or sign-off. Default is zero; retain only when necessary. Flag it in the header and record the expected result. |
-| `unreachable` | Required hardware, access, or actor is currently unavailable. Record the blocker; do not treat it as satisfied. |
+| `owner` | Requires a named human's action or sign-off. Default is zero. Goes under `## Blocked on` as a line naming the person and the result to confirm. |
+| `unreachable` | Required hardware, access, or actor is currently unavailable. Record it under `## Blocked on`; it is not a checkbox and does not count toward progress. |
 
 Check available tools and equivalent environments before declaring a blocker. A substitute counts only for the property it actually proves: a simulator cannot silently replace required physical-device evidence, nor a mock replace required live-service validation. State remaining gaps.
 
-Start approved shared checks when their inputs are ready and continue independent phases. Their results remain required for acceptance. Every `local` box being green does not imply that shared checks, implementation elsewhere, or the PRD itself are complete.
+Start approved shared checks when their inputs are ready and continue independent phases; their results remain required. Every `local` box green does not make the PRD complete.
 
-The lane rule comes from a source-supplied audit across three unrelated repos (a native game framework, a TypeScript game API, and a CLI tool): 700+ PRDs and 240 rejected completion attempts. The criteria that stayed unticked were disproportionately the ones requiring evidence the author could not reach:
+The lane rule comes from a source-supplied audit of 700+ PRDs and 240 rejected completion attempts across three unrelated repos: the criteria that stayed unticked were the ones needing evidence the author could not reach — 40% of open versus 17% of closed PRDs in one repo (physical device), 53% versus 23% in another (deploy/staging). Design evidence for the lane model, not a fact to re-prove during execution.
 
-| Repo's out-of-reach thing | Share of OPEN PRDs | Share of CLOSED PRDs |
-|---|---|---|
-| physical device (native framework) | 40% | 17% |
-| e2e / live pilot run (game API) | 24% | 9% |
-| e2e / live run (its client) | 50% | 8% |
-| deploy / staging (game API client) | 53% | 23% |
-| hosted CI run, publish, release tag | 3-4% | 1% |
-
-Treat these figures as design evidence for the lane model, not as repository facts to re-prove during normal execution.
-
-For `unreachable` qualification work, split into a linked qualification PRD only when its scope is genuinely separable. During execution, moving an agreed AC requires authorization. A qualification dependency needed to satisfy this PRD remains completion-blocking; splitting or relabeling it never counts as verification.
+For `unreachable` qualification work, name the blocker in `## Blocked on` and split it into a linked qualification PRD only when its scope is genuinely separable. A qualification dependency needed to satisfy this PRD still blocks closure; relabeling it never counts as verification.
 
 ### Owner lane
 
-This skill does not authorize deploying, publishing, rotating credentials, or changing production. Keep those actions out of autonomous phase steps. A separate explicit request must use the applicable authorization/workflow; the lane itself grants no permission.
+This skill does not authorize deploying, publishing, rotating credentials, or changing production; those need a separate explicit request through the applicable authorization workflow. Name the owner, the action to confirm, and the repository's header flag for the human gate, and ask once at the end, after agent-executable work is verified. Never perform or approve the owner's action, and record a result only from attributable evidence. Pending owner acceptance keeps the PRD open.
 
-For a required human gate, name the owner, action/result to confirm, and an applicable header flag: `POST-DEPLOY-EVALUATION-REQUIRED`, `POST-RELEASE-EVALUATION-REQUIRED`, or `POST-DEVICE-EVALUATION-REQUIRED`. Use the repository's equivalent for other human sign-offs. Keep the flag near the top; do not add it speculatively.
+### Size cap
 
-Ask once at the end, after agent-executable work is verified; combine outstanding human gates into one request. While working, surface blockers in status updates without repeated action requests. Do not perform the owner action or approve it on their behalf. Record an owner result only from attributable confirmation/evidence. Pending owner acceptance keeps the PRD open.
-
-### Closability budget
-
-| Mode | Target maximum phases | Target maximum required boxes | Typical external gates |
-|---|---|---|---|
-| LOW | 2 | 8 | No speculative shared/owner gates. |
-| MEDIUM | 4 | 16 | At most one shared/qualification dependency; no speculative owner gate. |
-| HIGH | 6 | 24 | At most one shared dependency and one necessary, flagged owner gate. |
-
-These are planning budgets, not permission to remove required validation. Consolidate duplicate boxes or split genuinely independent scope first. If required coverage still exceeds a budget, preserve it and explain the exception; never weaken an AC, disguise several outcomes as an untestable box, or raise the tier merely to allow a human gate. Every box must establish a distinct required fact.
-
-The same source audit found more boxes on open PRDs than closed ones (7 vs 12 in one repo, 23 vs 31 in another, 30 vs 38 in a third), while PRDs that never closed carried 46, 54, and 67 boxes. That is why the budgets are binding planning pressure: over budget means consolidate duplicate proof or split independent scope, not silently add ceremony. Required facts still win over the budget.
+**At most 3 phases and about 8 boxes per PRD**, whatever the complexity mode. Work that does not fit is a second PRD, not a longer checklist: consolidate duplicate proof, or split genuinely independent scope. Never weaken a criterion, disguise several outcomes as one untestable box, or raise the mode merely to allow a human gate. If required coverage genuinely exceeds the cap, preserve it, say why in the PRD, and split the rest.
 
 ---
 
@@ -127,6 +105,16 @@ Delete or delegate obsolete paths. Temporary coexistence needs explicit migratio
 
 ---
 
+## The shape of a box
+
+A PRD is only as honest as its boxes, and a box nobody can tick is worse than no box at all.
+
+- **Name the proof on the box.** `- [ ] Linux desktop build runs 300 frames. proof: \`npm run verify:desktop\`` — a command, a CI job/run, or a PR. When that proof is green, anyone may tick it and write the result beside it (`300 frames, exit 0`). A box with no proof is a wish.
+- **No ceremony boxes.** An observed revert check, a reviewer's PASS, a written evidence record, an artificial negative control, a caller census: that is paperwork, and it belongs in the PR body or the PR template. Keep the work, drop the ceremony.
+- **What you cannot reach is not a box.** Hardware, credentials, other people and owner decisions go under `## Blocked on`, one line each naming who or what unblocks it. They do not count toward progress, and they never harden into untickable boxes.
+- **A decision deletes a moot box.** Record what was decided, by whom, on what date and why under `## Decisions`, then delete the box it made moot. Delete a box no other way. Ticked work is never deleted, and a finished PRD is never un-filed and rewritten as a fresh plan.
+- **Cap the PRD: at most 3 phases and about 8 boxes.** One claim per box; a criterion that conjoins several facts is several boxes or a `## Blocked on` line.
+
 ## Plan Structure
 
 Keep the repository's organization and these tooling-facing field names:
@@ -147,19 +135,23 @@ Approach, consumer flow, reused components, data changes, risks.
 Architecture/sequence diagram only where it resolves real ambiguity.
 
 ## Acceptance Criteria
-- [ ] AC-1 [local; actor: agent]: <consumer action → observable result, platform/threshold> — Evidence: pending.
+- [ ] AC-1 [local]: <consumer action → observable result, platform/threshold> — proof: `<command or job or PR>` — Evidence: pending.
+
+## Blocked on
+- <what is out of reach, and who or what unblocks it> — unblocked by <person, credential, device or decision>.
 
 ## Integration Ledger
 <Applicable rows, or Integration: unchanged — reason.>
 
+## Decisions
+- <date> (<who>): <what was decided and why>.
+
 ## Execution Phases
 #### Phase 1: <one working outcome>
 **Status:** NOT STARTED
-**ACs:** AC-1
 **Files:** <new/edited paths and purpose>
 **Implementation:** <steps, contracts, error handling>
-**Verification:** E1 — <command/flow, assertion, ACs and distinct risks covered>
-**Checkpoint:** pending
+**Verification:** `<command or job>` — <assertion, ACs and distinct risks covered>
 ```
 
 Add required owner flags near `**Status:**`; omit absent flags rather than filling them with `None`. Allowed status values: `NOT STARTED`, `PROPOSED`, `PARTIAL`, `IN PROGRESS`, `BLOCKED`, `DONE`, `REOPENED`. Keep status values exact; put explanations on a separate line:
@@ -169,7 +161,7 @@ Add required owner flags near `**Status:**`; omit absent flags rather than filli
 **Blocker:** Implementation verified; awaiting <owner>'s <named check> for AC-3.
 ```
 
-Preserve `**Progress:**` where tooling uses it. Checkboxes are for required work/ACs, not examples, alternatives, or optional follow-ups. Reuse existing required checklists instead of creating parallel copies. The closure helper's parser is authoritative for syntax; inspect it when conventions are unclear.
+Preserve `**Progress:**` where tooling uses it. Checkboxes are for required work/ACs, not examples, alternatives, or optional follow-ups, and not ceremony. Drop the `## Blocked on` and `## Decisions` sections when they are empty. Reuse existing required checklists instead of creating parallel copies. The closure helper's parser is authoritative for syntax; inspect it when conventions are unclear.
 
 ---
 
@@ -186,8 +178,8 @@ Implement scope, run selected affected checks, record evidence and integration l
 Store evidence once, on the owning AC or existing phase box. Reference it elsewhere:
 
 ```markdown
-- [x] AC-1 [local; actor: agent]: Invoice appears after checkout — E1: <actual command>, <passed/collected counts>, exit <code>; <tested source snapshot>, <environment>; asserts persisted invoice through checkout. Red: <cause, when required>.
-- [x] AC-2 [local; actor: agent]: Repeated checkout is idempotent — E1, assertion <test name>.
+- [x] AC-1 [local]: Invoice appears after checkout. proof: `npm test -- invoice` — 12 passed, exit 0; <tested snapshot>, <environment>; asserts the persisted invoice through checkout.
+- [x] AC-2 [local]: Repeated checkout is idempotent. proof: `npm test -- idempotent`, assertion <test name>.
 ```
 
 Identify the tested revision including relevant uncommitted changes; a commit hash alone does not identify a dirty worktree. For shared evidence, link the actual run/artifact and relevant job result. Keep output concise, inspect failure details, and retain the useful artifact reference — not a full log dump or a separate report per phase unless tooling/user requirements need one. A tool exit code alone does not establish the asserted outcome.
@@ -198,13 +190,11 @@ Identify the tested revision including relevant uncommitted changes; a commit ha
 
 Self-verification is mandatory after every phase: compare the diff to ACs, inspect reachability and failure handling, then evaluate actual execution evidence. No checklist or reviewer verdict substitutes for running the selected checks.
 
-LOW uses self-review. MEDIUM/HIGH use one `prd-work-reviewer` or equivalent at substantive checkpoints when available. An equivalent orchestrator review of the same scope satisfies this requirement; do not spawn a duplicate. If unavailable, perform and label self-review. An explicitly required independent review stays outstanding until actually completed.
+LOW uses self-review. MEDIUM/HIGH use one `prd-work-reviewer` or equivalent at a substantive checkpoint when available; an equivalent orchestrator review of the same scope satisfies it. If unavailable, perform and label self-review. The verdict is reported in the PR, never as a PRD checkbox.
 
-Pass the reviewer the PRD path, phase/AC IDs, changed paths, tested snapshot, concise evidence, and unresolved risks. Use the harness's available delegation tool; do not assume a particular Task API exists.
+Pass the reviewer the PRD path, phase/AC IDs, changed paths, tested snapshot, concise evidence and unresolved risks, using whatever delegation tool the harness has. Review the diff and the evidence first: AC alignment, reachable consumers, incumbent routing, required platforms, assertion quality. Rerun only a named coverage gap, stale result or suspected false positive, and report `PASS`, `NEEDS CORRECTION` or `BLOCKED` with actionable locations.
 
-Review the diff and supplied evidence first. Check AC alignment, reachable consumers, incumbent routing, required platforms, and assertion quality. Rerun only a named coverage gap, stale result, or suspected false positive. Report `PASS`, `NEEDS CORRECTION`, or `BLOCKED` with actionable locations. Do not run the full suite merely because you are the reviewer.
-
-Fix findings, rerun affected checks, and review the correction/delta only. Independent reviewer findings whose fixes do not overlap may be handled concurrently; related findings stay with one root-cause investigation. Required shared/owner acceptance may remain pending while independent work continues; do not mark its ACs or owning phase DONE early. Do not request generic "reply continue" approvals after verified phases. Human checkpoints use the owner lane, not an additional checklist.
+Fix findings, rerun affected checks, and review the correction/delta only. Findings that do not overlap may be handled concurrently; related findings stay with one root-cause investigation. Required shared/owner acceptance may remain pending while independent work continues; do not mark its ACs or owning phase DONE early. Human checkpoints use the owner lane, not an extra checklist.
 
 ---
 
@@ -212,11 +202,7 @@ Fix findings, rerun affected checks, and review the correction/delta only. Indep
 
 ### Select checks by marginal value
 
-Before adding any test or verification step, answer:
-
-> Which plausible failure does this catch that the selected checks do not?
-
-If none, omit it. Extend an existing test/fixture before creating a new harness. Select the cheapest reliable instrument at the relevant boundary. Distinct layers earn their cost by detecting distinct failures.
+Before adding any test or verification step, answer: *which plausible failure does this catch that the selected checks do not?* If none, omit it. Extend an existing test or fixture before building a new harness, and pick the cheapest reliable instrument at the relevant boundary.
 
 | Risk | Suitable evidence |
 |---|---|
@@ -227,7 +213,7 @@ If none, omit it. Extend an existing test/fixture before creating a new harness.
 | Performance | Comparable measurements against the AC's workload, environment, and threshold. |
 | Docs/config/build tooling | Relevant parser, build, link, consumer, or smoke check; no dummy unit-test quota. |
 
-One real-entry-point integration test may prove behavior, wiring, and regression safety together. Do not additionally require curl, a demo, or another E2E for the same property. A mocked helper test cannot claim that integration coverage; typechecking alone cannot prove runtime behavior.
+One real-entry-point integration test can prove behavior, wiring and regression safety together — do not also require curl, a demo or another E2E for the same property. A mocked helper test cannot claim integration coverage, and typechecking alone cannot prove runtime behavior.
 
 ### Minimum sufficient proof and the stop condition
 
@@ -258,15 +244,13 @@ These controls are conditional diagnostics, not a universal checklist. Use a row
 
 Investigate specific false-pass risks: uncollected tests, self-comparisons, stale artifacts, ignored assertions, vacuous fixtures, and mocks bypassing production. Prefer runner/provenance output and existing coverage. Inject a deliberate failure only where cheaper inspection cannot establish collection or sensitivity. A call count alone does not prove the promised end state.
 
-Temporary mutations must be isolated and reversible. Preserve user changes, restore the exact candidate, and rerun the affected check to green. Never mutate production, disable real security controls, or commit the negative control. When a required proof cannot run safely, leave that claim `UNVERIFIED` — not passed.
+Temporary mutations must be isolated and reversible: preserve user changes, restore the exact candidate, rerun the affected check to green. Never mutate production, disable real security controls, or commit a negative control. A proof that cannot run safely stays `UNVERIFIED`.
 
 ### Reuse valid evidence
 
-Reuse evidence while its relevant code, dependencies, configuration, inputs, environment, and platform are unchanged and the observed state remains applicable. Later edits invalidate affected evidence, not every result in the PRD. CI evidence must match the candidate's relevant scope and show that required tests actually ran; a skipped/cancelled job is not a passing check.
+Reuse evidence while its code, dependencies, configuration, inputs, environment and platform are unchanged. Later edits invalidate the affected evidence, not every result in the PRD. CI evidence must match the candidate's scope and show the required tests actually ran — a skipped or cancelled job is not a passing check.
 
-Run focused checks during iteration. Run required broader gates once at final verification unless an applicable matching result already exists; run earlier when risk warrants. Never weaken repository/user-required checks to meet a token budget. Do not rerun unrelated suites after status-only edits; verify affected links/metadata and honor required CI policy.
-
-Missing execution/access means `UNVERIFIED` or `BLOCKED`. Existing red CI is not a passing gate; use only an explicit authorized waiver process, never an invented exception.
+Run focused checks while iterating and the broader required gates once at final verification, unless a matching result already exists. Never weaken a required check to meet a token budget, and never rerun unrelated suites after status-only edits. Missing execution or access means `UNVERIFIED` or `BLOCKED`; existing red CI is not a passing gate, and only an explicit authorized waiver counts.
 
 ---
 
@@ -276,13 +260,11 @@ Write criteria about consumers and observable outcomes, not mere artifact existe
 
 When every in-scope AC is implemented and verified, all required gates/reviews and completion-blocking dependencies are satisfied, and no required work remains, you MUST mark the PRD DONE and move it to the repository's `done/` location in the same implementation task. Do not stop at "ready to close" or merely recommend the move.
 
-This includes required `local`, `shared`, and `owner` evidence. An open owner check means `PARTIAL` with a separate blocker explanation, not `DONE`. Unreachable required qualification also blocks closure. "Code complete" is a qualified implementation statement, not completed acceptance.
+This includes required `local`, `shared` and `owner` evidence. An open owner check means `PARTIAL` with a separate blocker explanation, not `DONE`, and unreachable required qualification blocks closure too. "Code complete" is a qualified implementation statement, not completed acceptance.
 
-Never tick, delete, weaken, or relabel a required AC to make closure succeed. Not-applicable items need a factual scope explanation; changes to agreed requirements need authorization. Preserve the decision rather than falsely checking the item. Optional follow-ups do not block closure; unfinished required work does.
+Never tick, delete, weaken, or relabel a required AC to make closure succeed. The one exception is R4: a decision that made a box moot deletes it and is recorded under `## Decisions`. Not-applicable items need a factual scope explanation; changes to agreed requirements need authorization. Closure consumes existing evidence; it is not another test suite or review cycle. Reconcile the boxes, phase statuses, `**Status:**` and `**Progress:**` from recorded evidence — gaps and placeholders keep the PRD open. Optional follow-ups do not block closure; unfinished required work does.
 
-Closure consumes existing evidence; it is not another test suite or review cycle.
-
-Reconcile existing AC/task boxes, phase statuses, `**Status:**`, and `**Progress:**` from recorded evidence. Required proof gaps and unresolved placeholders keep the PRD open.
+A PRD whose only remaining work is its `## Blocked on` list is not DONE: file it under the repository's blocked location (`BLOCKED/<reason>/` where that convention exists), naming the reason in the folder, so the owner can validate it later. Any PRD with doable work left stays where it is.
 
 Use the repository's `prd-manager` closure helper when available; inspect its usage and destination. For installations with this layout:
 
@@ -290,13 +272,9 @@ Use the repository's `prd-manager` closure helper when available; inspect its us
 node "$HOME/.claude/skills/prd-manager/scripts/prd-close.mjs" "<prd-path>" --yes
 ```
 
-If the helper is unavailable, update fields and use `git mv` to the established done directory, or `done/` under the PRD root when no convention exists. Use a normal move for an untracked file or outside Git. Preserve filename/ID and never overwrite a collision. A helper rejection for unmet requirements is not permission to bypass it manually.
+If the helper is unavailable, update the fields and `git mv` to the established done directory (or `done/` under the PRD root when no convention exists); use a normal move outside Git, and never overwrite a collision. A helper rejection is not permission to bypass it manually. Verify the destination exists, the old path is gone and the status fields are accurate, then update affected board/index links and PR references.
 
-Verify the destination exists, the old path is gone, and status/phase/progress fields are accurate. Update affected board/index links and PR references. Use one relevant closure audit when provided; no unrelated repository-wide audit is required.
-
-Include the move/status/link changes in the finishing commit or PR when authorized. Do not merge or deploy merely to close a PRD. If the repository requires merge/release before DONE, retain the verified intermediate state until that gate is satisfied.
-
-Report verified implementation separately from incomplete archival if a move/status write fails. Final output names completed ACs, concise evidence, final PRD path — or the exact remaining gap. Never claim a move or successful run without observing it.
+Include the move/status/link changes in the finishing commit or PR when authorized, but do not merge or deploy merely to close a PRD. Report verified implementation separately from incomplete archival if a move or status write fails, and never claim a move or a successful run without observing it.
 
 ---
 
@@ -323,4 +301,4 @@ These are the concrete diff signatures of "implemented but not integrated." Scan
 | **Envelope ≠ state** | The call returns success and the persisted state is unchanged — `changed: true` written next to an empty object |
 | **Pure function stands in for the loop** | The evidence harness calls the function directly; the frame loop / request path never does |
 
-The measured audit figures in §0.5 are retained inline so this skill has no dangling `references/` dependency. They are source-supplied historical rationale; active execution rules remain the sections above.
+The §0.5 audit figures are source-supplied rationale, kept inline so this skill has no dangling `references/` dependency; the sections above are the active rules.

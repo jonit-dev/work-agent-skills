@@ -13,8 +13,14 @@ import { findPrdRoot, loadPrds, parseArgs, savingsLine, truncate } from "./prd-l
 
 const DONE_WORDS = /\b(?:DONE|COMPLETE|COMPLETED|SHIPPED|LANDED|CLOSED)\b/u;
 const OPEN_WORDS = /\b(?:PARTIAL|NOT STARTED|PROPOSED|OPEN|SCOPING|IN PROGRESS|BLOCKED|DRAFT)\b/u;
-/** Two or more independent clauses in one criterion — a box that can never be ticked. */
-const COMPOUND = /\[ \][^\n]*\band\b[^\n]*\band\b/gu;
+/** The `proof:` marker R1 asks every countable box to carry. */
+const PROOF = /\bproof:/iu;
+/** Process theatre: things nobody can fail, so nobody can finish them either. */
+const CEREMONY =
+  /revert(?:ed|ing)?\s+(?:the\s+\w+\s+)?check|revert the change|re-?apply the (?:commit|change)|independent (?:review|reviewer|pass)|second (?:review|reviewer|eyes)|evidence (?:record|file|report|ledger|document)|negative control|artificial (?:negative|failure)|caller census/iu;
+/** R5's size cap: at most 3 phases, about 8 boxes. */
+const MAX_PHASES = 3;
+const MAX_BOXES = 8;
 
 const EVIDENCE_DIRS = ["docs/verification", "docs/evidence", "verification", "evidence"];
 
@@ -55,6 +61,43 @@ function referencedNames(repoRoot, evidenceDir) {
   }
 }
 
+/**
+ * Every countable box as one string: the box line plus its indented continuation, so a
+ * `proof:` written on the next line still counts. `## Blocked on` and `## Decisions` are
+ * not work, so their lines are never judged.
+ */
+function countableBoxes(markdown) {
+  const out = [];
+  let note = false;
+  let last = -1;
+  for (const line of markdown.split("\n")) {
+    if (/^#{2,4}\s/u.test(line)) {
+      note = NOT_A_BOX_HEADING.test(line);
+      last = -1;
+    } else if (note) continue;
+    else if (BOX.test(line)) {
+      out.push(line.trim());
+      last = out.length - 1;
+    } else if (last !== -1 && /^\s{2,}\S/u.test(line)) out[last] += ` ${line.trim()}`;
+  }
+  return out;
+}
+
+const BOX = /^\s*[-*]\s+\[[ xX]\]/u;
+const NOT_A_BOX_HEADING = /^#{2,4}\s+(?:Blocked on|Blocked|Decisions)\b/iu;
+const COMPOUND_ONE = /\[ \][^\n]*\band\b[^\n]*\band\b/u;
+
+/** One read per open PRD, three verdicts off the same boxes. */
+function boxFindings(p) {
+  const out = { ceremony: 0, compound: 0, noProof: 0 };
+  for (const box of countableBoxes(readFileSync(p.file, "utf8"))) {
+    if (PROOF.test(box) === false) out.noProof += 1;
+    if (COMPOUND_ONE.test(box)) out.compound += 1;
+    if (CEREMONY.test(box)) out.ceremony += 1;
+  }
+  return out;
+}
+
 function main() {
   const { flags } = parseArgs(process.argv.slice(2));
   const root = flags.root === undefined ? findPrdRoot() : flags.root;
@@ -68,11 +111,51 @@ function main() {
     if (items.length > 0) findings.push({ fix, items, key, title });
   };
 
+  const open = prds.filter((p) => !p.done);
+
   add(
     "ready-not-filed",
     "Finished but still open — every phase and acceptance box ticked",
     "prd-close.mjs <file> --yes",
-    prds.filter((p) => !p.done && p.percent === 100).map((p) => p.rel),
+    prds.filter((p) => !p.done && p.percent === 100 && !p.blockedOnly).map((p) => p.rel),
+  );
+
+  add(
+    "blocked-only-not-filed",
+    "Only `## Blocked on` items are left, but the file still reads as live work",
+    "prd-close.mjs <file> --blocked <reason> — names what unblocks it, then fix the links",
+    prds
+      .filter((p) => p.blockedOnly && !p.blocked)
+      .map((p) => `${p.rel}  (${p.blockedOn} blocked item${p.blockedOn === 1 ? "" : "s"})`),
+  );
+
+  const boxes = new Map(open.map((p) => [p.rel, boxFindings(p)]));
+
+  add(
+    "ceremony-box",
+    "Ceremony boxes — an observed ritual nobody can fail, so nobody can finish it",
+    "delete the box; the ritual belongs in the PR body or the PR template",
+    open
+      .filter((p) => boxes.get(p.rel).ceremony > 0)
+      .map((p) => `${p.rel}  (${boxes.get(p.rel).ceremony})`),
+  );
+
+  add(
+    "over-size-cap",
+    `Over the size cap — more than ${MAX_PHASES} phases or about ${MAX_BOXES} boxes`,
+    "split it into separate PRDs, each citing this one",
+    open
+      .filter((p) => p.phases > MAX_PHASES || p.phaseBoxes + p.acceptanceTotal > MAX_BOXES)
+      .map((p) => `${p.rel}  (${p.phases} phases, ${p.phaseBoxes + p.acceptanceTotal} boxes)`),
+  );
+
+  add(
+    "no-proof",
+    "Box without proof: — nobody can tell when it is allowed to be ticked",
+    "name the proof on the box (`proof: <command | CI job | PR>`), or cite the evidence beside it",
+    open
+      .filter((p) => boxes.get(p.rel).noProof > 0)
+      .map((p) => `${p.rel}  (${boxes.get(p.rel).noProof})`),
   );
 
   add(
@@ -110,14 +193,10 @@ function main() {
   add(
     "compound-criteria",
     "Acceptance boxes conjoining independent claims — unreachable by construction",
-    "one box per platform, per artifact, per property",
-    prds
-      .filter((p) => !p.done)
-      .map((p) => {
-        const hits = readFileSync(p.file, "utf8").match(COMPOUND);
-        return hits === null ? undefined : `${p.rel}  (${hits.length})`;
-      })
-      .filter((entry) => entry !== undefined),
+    "split it into one box per claim, or move the unreachable clause to a `## Blocked on` line",
+    open
+      .filter((p) => boxes.get(p.rel).compound > 0)
+      .map((p) => `${p.rel}  (${boxes.get(p.rel).compound})`),
   );
 
   const ids = new Map();
@@ -173,15 +252,19 @@ function main() {
 
   const ORDER = [
     "ready-not-filed",
+    "blocked-only-not-filed",
+    "ceremony-box",
     "status-says-done",
     "status-says-open",
     "duplicate-ids",
+    "over-size-cap",
     "no-phase-boxes",
     "compound-criteria",
     "misfiled-done",
     "never-started",
     "blocked-without-reason",
     "blocked-stale",
+    "no-proof",
     "orphan-evidence",
   ];
   findings.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
