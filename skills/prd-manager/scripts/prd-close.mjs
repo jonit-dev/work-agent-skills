@@ -6,13 +6,14 @@
  * Dry run by default: it prints the plan and changes nothing until `--yes`.
  *
  * Usage: node prd-close.mjs <prd file> [--yes] [--keep-batch] [--no-status] [--force]
+ *        node prd-close.mjs <prd file> --blocked <reason> [--yes]
  *        node prd-close.mjs <prd file> --reopen --reason "<what regressed>" [--yes]
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { findPrdRoot, parseArgs, progressOf, repoRootOf } from "./prd-lib.mjs";
-import { stampDone, stampReopened } from "./prd-status.mjs";
+import { stampBlocked, stampDone, stampReopened } from "./prd-status.mjs";
 
 const BOX = /^\s*[-*]\s+\[([ xX])\]\s*(.*)$/u;
 
@@ -146,6 +147,61 @@ function main() {
         "Add the boxes from the phase prose first, or pass --force if the PRD genuinely has no phases.\n",
     );
     if (flags.force !== true) process.exit(1);
+  }
+
+  // `--blocked <reason>`: every box in reach is ticked, so this is not a close. It is a
+  // file moving out of the live list until whoever or whatever is named comes back.
+  if (typeof flags.blocked === "string") {
+    const reason = flags.blocked.trim();
+    if (!/^[a-z0-9][a-z0-9-]*$/u.test(reason)) {
+      process.stderr.write(
+        `--blocked needs a short reason slug naming what unblocks it (lower case, e.g. "requires-physical-device", "release-credentials", "owner-decision") — got "${flags.blocked}".\n`,
+      );
+      process.exit(1);
+    }
+    if (progress.openBoxes > 0 && flags.force !== true) {
+      const open = openBoxes(markdown);
+      process.stderr.write(
+        `${file} still has ${open.length} open box${open.length === 1 ? "" : "es"} — ` +
+          "that is doable work, so it stays filed where it is.\n" +
+          `  phases     ${progress.phasesComplete}/${progress.phases} (${progress.phaseBoxesTicked}/${progress.phaseBoxes} boxes)\n` +
+          `  acceptance ${progress.acceptanceTicked}/${progress.acceptanceTotal}\n` +
+          "\nMove the unreachable part to a `## Blocked on` line first, or pass --force.\n",
+      );
+      process.exit(1);
+    }
+    if (progress.blockedOn === 0) {
+      process.stderr.write(
+        `${file} has no \`## Blocked on\` list, so --blocked would file it with nothing to wait for.\n`,
+      );
+      process.exit(1);
+    }
+    const target = join(root, "BLOCKED", reason, basename(full));
+    const stamped =
+      flags["no-status"] === true
+        ? { changes: [], markdown }
+        : stampBlocked(markdown, { date: today(), reason });
+    process.stdout.write(
+      `file    ${relative(repoRoot, full)}  (${progress.percent}%, ` +
+        `${progress.openBoxes} open box${progress.openBoxes === 1 ? "" : "es"}, ` +
+        `${progress.blockedOn} blocked item${progress.blockedOn === 1 ? "" : "s"})\n` +
+        `    ->  ${relative(repoRoot, target)}\n` +
+        (flags["no-status"] === true
+          ? "status  left as written\n"
+          : stamped.changes.map((change) => `status  ${change}\n`).join("")),
+    );
+    if (!apply) {
+      process.stdout.write("\ndry run — add --yes to apply.\n");
+      return;
+    }
+    if (flags["no-status"] !== true) writeFileSync(full, stamped.markdown);
+    gitMove(repoRoot, full, target);
+    process.stdout.write(
+      "\ndone. Move it in one commit with the links you broke, then let whoever the reason\n" +
+        "names validate it later:\n\n" +
+        `  docs(PRDs): file ${basename(full)} under BLOCKED/${reason}/\n`,
+    );
+    return;
   }
 
   if (progress.percent !== 100 && flags.force !== true) {

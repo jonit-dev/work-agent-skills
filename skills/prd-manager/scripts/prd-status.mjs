@@ -91,6 +91,32 @@ export function stampDone(markdown, { date, openBoxes = 0, sha, pr }) {
   return { changes, markdown: lines.join("\n") };
 }
 
+/**
+ * The other archive move: every box a reader can reach is ticked and the only items left
+ * are `## Blocked on`, so the file stops reading as live work. The status says which folder
+ * and why, so the move is legible without opening the diff.
+ */
+export function stampBlocked(markdown, { date, reason }) {
+  const lines = markdown.split("\n");
+  const changes = [];
+  setHeaderField(
+    lines,
+    FIELD("blocked:?"),
+    `**Blocked:** ${date}, filed under \`BLOCKED/${reason}/\` — only the \`## Blocked on\` items remain.`,
+    changes,
+    "blocked",
+  );
+  setHeaderField(
+    lines,
+    STATUS_FIELD,
+    `**Status:** BLOCKED — ${date}. Every box is ticked; only the \`## Blocked on\` items remain.`,
+    changes,
+    "status",
+  );
+  setPhaseStatuses(lines, `**Status:** DONE — ${date}.`, changes);
+  return { changes, markdown: lines.join("\n") };
+}
+
 /** The regression path: the header says what reopened it, and the Closed stamp goes. */
 export function stampReopened(markdown, { date, reason }) {
   const lines = markdown.split("\n");

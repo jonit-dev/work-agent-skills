@@ -3,7 +3,7 @@
  * One table of every PRD, so an agent can see the state of the work without reading
  * the PRDs. A few hundred PRDs are a million-plus tokens to read; this is one screen.
  *
- * Usage: node prd-board.mjs [--filter inflight|stalled|noboxes|ready|blocked|done|all]
+ * Usage: node prd-board.mjs [--filter inflight|stalled|noboxes|ready|blocked|blockedonly|done|all]
  *                           [--batch <substring>] [--older <days>] [--limit <n>]
  *                           [--pr] [--json] [--root <dir>]
  */
@@ -13,10 +13,12 @@ import { findPrdRoot, loadPrds, parseArgs, savingsLine, truncate } from "./prd-l
 const FILTERS = {
   all: () => true,
   blocked: (p) => p.blocked,
+  /** Only `## Blocked on` items are left, and the file still sits outside `BLOCKED/<reason>/`. */
+  blockedonly: (p) => !p.done && p.blockedOnly && !p.blocked,
   done: (p) => p.done,
   inflight: (p) => !p.done && !p.blocked && p.percent > 0 && p.percent < 100,
   noboxes: (p) => !p.done && p.phases === 0,
-  ready: (p) => !p.done && p.percent === 100,
+  ready: (p) => !p.done && p.percent === 100 && !p.blockedOnly,
   stalled: (p) => !p.done && !p.blocked && p.percent === 0,
 };
 
@@ -82,7 +84,10 @@ function main() {
     p.acceptanceTotal === 0 ? "—" : `${p.acceptanceTicked}/${p.acceptanceTotal}`,
     p.ageDays === undefined ? "—" : `${p.ageDays}d`,
     flags.pr === true ? matchPr(prs, p.id) : "",
-    truncate(p.batch === "" ? "." : p.batch, 26),
+    truncate(
+      (p.batch === "" ? "." : p.batch) + (p.blockedOnly && !p.blocked ? " -> BLOCKED/<reason>" : ""),
+      26,
+    ),
     truncate(p.status, 52),
   ]);
 
@@ -108,7 +113,7 @@ function main() {
   const summary =
     `\n${all.length} PRDs: ${counts.done} done, ${counts.ready} ready to file, ` +
     `${counts.inflight} in flight, ${counts.stalled} at 0%, ${counts.noboxes} with no phase boxes, ` +
-    `${counts.blocked} blocked\n`;
+    `${counts.blocked} filed blocked, ${counts.blockedonly} blocked-only but not filed\n`;
   process.stdout.write(summary);
   process.stdout.write(savingsLine(shown, out + summary));
 }
