@@ -16,7 +16,13 @@ It also starts the live report on `http://127.0.0.1:8765` when nothing serves th
 (`TOKEN_DOCTOR_PORT` moves it). Give the user that link; do not open the HTML file. The page
 rebuilds on each load and reloads every minute: active sessions, the last hour's burn rate
 against the ideal pace to the plan's weekly reset, and the leaks.
-The dashboard tabs show Dashboard first: what to act on now; then Leaks, Trends, Baseline, Details.
+The Dashboard tab opens with the KPI tiles and trends, then what to act on now; Leaks, Baseline
+and Details follow.
+
+The weekly reading comes from the subscription usage endpoint, which rate-limits. A status line
+can feed it instead: write `{"fetched": <epoch>, "seven_day": {"utilization": <used %>,
+"resets_at": <epoch>}}` from its `rate_limits.seven_day` input to
+`${XDG_CACHE_HOME:-~/.cache}/claude-token-doctor/usage.json`. A reading under 5 minutes old wins.
 
 It prints a verdict, each leak ranked by share of spend with its fix and the worst sessions,
 and the baseline levers that miss their target. It exits 1 when it finds a leak. It also

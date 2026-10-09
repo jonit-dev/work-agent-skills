@@ -165,6 +165,8 @@ def claude_turns(path):
                 record = json.loads(line)
             except ValueError:
                 continue
+            # The directory name encodes the whole path; the record's cwd names the project.
+            project = os.path.basename((record.get("cwd") or "").rstrip("/")) or project
             if record.get("type") == "user":
                 kind = claude_user_wake(record)
                 if kind:
@@ -541,42 +543,64 @@ def build_report(args):
             # Calibrate: this week's local spend is `used` percent of the plan's week.
             limit = spent * 100 / week["used"]
             hours_left = max((week["resets"] - now).total_seconds() / 3600, 1)
-            burn["week"] = {"resets": week["resets"], "hours_left": hours_left,
+            burn["week"] = {"resets": week["resets"], "hours_left": hours_left, "used": week["used"],
                             "ideal": max(limit - spent, 0) / hours_left}
         report["burns"][source] = burn
     return report
 
 
+def usage_cache():
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(base, "claude-token-doctor", "usage.json")
+
+
 def plan_week():
     """The subscription's 7-day window, from the endpoint /usage reads; None when unavailable.
 
-    Sends the Claude Code login token only to api.anthropic.com. Cached for 5 minutes."""
+    Sends the Claude Code login token only to api.anthropic.com. The last good reading is
+    kept on disk: reused for 5 minutes, and whenever a call fails (the endpoint rate-limits)."""
     import subprocess
     import time
     import urllib.request
-    fetched, last = _CACHE.get("week", (0, None))
-    if time.time() - fetched < (300 if last else 60):
-        return last
+    if time.time() - _CACHE.get("week_try", 0) < 60:
+        return _CACHE.get("week")
+    _CACHE["week_try"] = time.time()
+    try:
+        with open(usage_cache()) as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        saved = {}
+    data = saved.get("seven_day")
+    if not data or time.time() - saved.get("fetched", 0) >= 300:
+        try:
+            try:
+                with open(os.path.join(os.path.dirname(claude_root()), ".credentials.json")) as fh:
+                    creds = fh.read()
+            except OSError:  # macOS keeps the login in the Keychain
+                creds = subprocess.run(
+                    ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                    capture_output=True, text=True, timeout=5, check=True).stdout
+            token = json.loads(creds)["claudeAiOauth"]["accessToken"]
+            req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
+                "Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.load(resp)["seven_day"]
+            os.makedirs(os.path.dirname(usage_cache()), exist_ok=True)
+            with open(usage_cache(), "w") as fh:
+                json.dump({"fetched": time.time(), "seven_day": data}, fh)
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            pass  # keep the saved reading
     week = None
     try:
-        try:
-            with open(os.path.join(os.path.dirname(claude_root()), ".credentials.json")) as fh:
-                creds = fh.read()
-        except OSError:  # macOS keeps the login in the Keychain
-            creds = subprocess.run(
-                ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-                capture_output=True, text=True, timeout=5, check=True).stdout
-        token = json.loads(creds)["claudeAiOauth"]["accessToken"]
-        req =urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
-            "Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.load(resp)["seven_day"]
-        resets = datetime.datetime.fromisoformat(data["resets_at"])
-        week = {"start": resets - datetime.timedelta(days=7), "resets": resets,
-                "used": float(data["utilization"])}
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-        week = last  # a failed call keeps the last good reading and retries after 60 s
-    _CACHE["week"] = (time.time(), week)
+        resets = data["resets_at"]  # ISO from the endpoint, epoch seconds from a status line
+        resets = (datetime.datetime.fromtimestamp(resets, datetime.timezone.utc)
+                  if isinstance(resets, (int, float)) else datetime.datetime.fromisoformat(resets))
+        if resets > datetime.datetime.now(datetime.timezone.utc):
+            week = {"start": resets - datetime.timedelta(days=7), "resets": resets,
+                    "used": float(data["utilization"])}
+    except (KeyError, TypeError, ValueError):
+        pass
+    _CACHE["week"] = week
     return week
 
 
@@ -969,7 +993,8 @@ def report_view(r):
         week = burn["week"]
         burns[source] = {"rate": burn["rate"], "goal": goal, "basis": basis,
                          "resets": iso(week["resets"]) if week else None,
-                         "hoursLeft": week["hours_left"] if week else None}
+                         "hoursLeft": week["hours_left"] if week else None,
+                         "used": week["used"] if week else None}
     return {
         "generated": iso(datetime.datetime.now(datetime.timezone.utc)), "days": r["days"],
         "total": r["total"], "sessions": r["session_count"], "turns": r["turns"],
