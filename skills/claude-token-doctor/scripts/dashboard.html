@@ -240,9 +240,13 @@ const KpiStrip = ({r, burn, source}) => {
     // Tokens left at reset: goal is the remaining budget spread over the hours left.
     const dry = rate > 0 ? (goal * left) / rate : Infinity;
     const reset = burn.resets ? toDate(burn.resets) : null;
+    const g = burn.gains ?? {};
+    const gain = (h, name) => (g[h] == null ? null : `+${Number(g[h]).toFixed(g[h] >= 10 ? 0 : 1)} pts ${name}`);
+    const gains = [gain(1, '1 h'), gain(6, '6 h'), gain(24, '24 h')].filter(Boolean).join(' · ');
     tiles.push(html`<${Tile} key="week" label="Weekly limit used" value=${Math.round(used) + '%'}
-        sub=${`${Math.round(elapsed)}% of the week gone`} state=${used > elapsed ? 'hot' : 'ok'}>
-        <${WeekBar} used=${used} elapsed=${elapsed} /></${Tile}>`,
+        sub=${gains || 'no recent spend'} state=${used > elapsed ? 'hot' : 'ok'}>
+        <${WeekBar} used=${used} elapsed=${elapsed} />
+        <div class="text-xs text-muted mt-1">${Math.round(elapsed)}% of the week gone (tick)</div></${Tile}>`,
       html`<${Tile} key="dry" label="At this burn, runs out in" value=${dry > left ? 'never' : hoursLabel(dry)}
         sub=${'reset in ' + hoursLabel(left) + (reset ? ' · ' + reset.toLocaleDateString(undefined, {weekday: 'short'}) + ' ' + clock(reset) : '')}
         state=${dry > left ? 'ok' : 'hot'} />`);
