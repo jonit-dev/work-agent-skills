@@ -825,6 +825,7 @@ def render_html(r):
     out.append('<div class="tiles">%s</div>' % "".join(
         '<div class="tile"><b>%s</b><span class="muted">%s</span></div>' % t for t in tiles))
 
+    out.append(render_timeline(r["timeline"]))
     issues = top_issues(r)
     prompts = [issue_prompt(i, r) for i in issues]
     if issues:
@@ -854,7 +855,6 @@ def render_html(r):
                    '</tr>' % (e(n), e(v), e(t), "ok" if ok else "bad", "ok" if ok else "fix")
                    for n, v, t, ok in r["baseline"]))
 
-    out.append(render_timeline(r["timeline"]))
     out.append('<h2>Spend by context size of the turn</h2><div class="card">')
     for label, low, pct, turns in r["buckets"]:
         out.append('<div class="row"><span>%s</span>%s<span class="muted">%.1f%% · %d turns'
