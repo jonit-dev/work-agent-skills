@@ -29,8 +29,7 @@ tailwind.config = {
 @media (prefers-color-scheme: dark) {
   :root { color-scheme: dark; --bg: #262624; --card: #30302e; --ink: #faf9f5; --muted: #a3a198; --line: #3d3d3a; --chip: #3d3d3a; }
 }
-.tnum { font-variant-numeric: tabular-nums; }
-html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 0.75rem; overflow-wrap: anywhere; }
 </style>
 <script>window.__REPORT__ = /*REPORT*/null</script>
@@ -60,12 +59,12 @@ const pct = (x) => {
 };
 const sharePct = (s) => (Number(s) || 0).toFixed(1) + '%';
 const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
-const cut = (text, n) => ((text || '').length > n ? text.slice(0, n - 1) + '…' : (text || ''));
 const toDate = (iso) => new Date(String(iso ?? '').replace(/(\.\d{3})\d+/, '$1'));
 const clock = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 const dayLabel = (d) => d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
 const stamp = (iso) => (iso && !isNaN(toDate(iso)) ? toDate(iso).toLocaleString() : '—');
 const sourceLabel = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const SHORT = {'Median context per turn': 'Median ctx', 'Turns over 300k context': 'Turns >300k', 'Caller reads per tool call': 'Caller reads'};
 const kpiFmt = (kpi, v) => (kpi.unit === '%' ? pct(v) : fmt(v));
 
 // Clipboard API first. A hidden textarea and execCommand are the fallback.
@@ -96,46 +95,67 @@ const CopyButton = ({text, label = 'Copy', className = ''}) => {
   return html`<button type="button" onClick=${onClick} class=${className}>${done ? 'Copied' : label}</button>`;
 };
 
-// Burn gauge. The needle shows burn.rate on a dial from 0 to 2x goal.
-const resetLabel = (iso) => {
-  const d = iso ? toDate(iso) : null;
-  if (!d || isNaN(d) || d <= Date.now()) return 'that lasts the week';
-  return 'that lasts until ' + d.toLocaleDateString(undefined, {weekday: 'short'}) + ' ' + clock(d);
+// Measured pixel size of a box, so an SVG can draw at 1:1 and keep its text undistorted.
+const useSize = () => {
+  const ref = React.useRef(null);
+  const [size, setSize] = React.useState({w: 0, h: 0});
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(([e]) => setSize({w: Math.round(e.contentRect.width), h: Math.round(e.contentRect.height)}));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size];
 };
 
+// Burn gauge. The dial runs from 0 to max(2x goal, 1.25x rate). Green up to the goal, coral past it.
 const Gauge = ({burn}) => {
   if (!burn?.goal) {
-    return html`<div class="py-10 text-center">
+    return html`<div class="py-6 text-center">
       <p class="text-muted">No hourly goal yet</p>
-      <p class="text-sm text-muted mt-1">Set --weekly-budget or sign in to Claude Code.</p>
+      <p class="text-xs text-muted mt-1">Set --weekly-budget or sign in to Claude Code.</p>
     </div>`;
   }
   const rate = Number(burn.rate) || 0;
   const goal = Number(burn.goal);
   const over = rate > goal;
-  const frac = Math.min(1, Math.max(0, rate / (2 * goal)));
-  const r = 100, cx = 120, cy = 112;
-  const at = (f) => [cx - r * Math.cos(Math.PI * f), cy - r * Math.sin(Math.PI * f)];
-  const [x0, y0] = at(0), [xm, ym] = at(0.5), [x1, y1] = at(1), [nx, ny] = at(frac);
-  const verdict = over ? `Slow down: ${(rate / goal).toFixed(1)}× the pace ${resetLabel(burn.resets)}` : 'On pace';
-  return html`<div class="text-center">
-    <svg viewBox="0 0 240 124" class="w-full max-w-[220px] h-auto mx-auto" role="img" aria-label="Burn rate against goal">
-      <path d="M${x0} ${y0} A${r} ${r} 0 0 1 ${xm} ${ym}" fill="none" stroke="#788c5d" stroke-width="8" stroke-linecap="round"/>
-      <path d="M${xm} ${ym} A${r} ${r} 0 0 1 ${x1} ${y1}" fill="none" stroke="#c0453a" stroke-width="8" stroke-linecap="round"/>
-      <line x1=${cx} y1=${cy} x2=${nx} y2=${ny} class="stroke-ink" stroke-width="3" stroke-linecap="round"/>
+  const max = Math.max(2 * goal, 1.25 * rate);
+  const fr = Math.min(1, rate / max), fg = goal / max;
+  const r = 76, cx = 100, cy = 100;
+  const at = (f, rad = r) => [cx - rad * Math.cos(Math.PI * f), cy - rad * Math.sin(Math.PI * f)];
+  const arc = (f0, f1, cls) => {
+    if (f1 - f0 < 0.002) return null;
+    const [xa, ya] = at(f0), [xb, yb] = at(f1);
+    return html`<path d="M${xa} ${ya} A${r} ${r} 0 0 1 ${xb} ${yb}" fill="none" class=${cls} stroke-width="8"/>`;
+  };
+  const [t0x, t0y] = at(fg, r - 8), [t1x, t1y] = at(fg, r + 6), [lx, ly] = at(fg, r + 15);
+  const th = Math.PI * fr, [tx, ty] = at(fr, r - 12);
+  const px = Math.sin(th) * 3.5, py = -Math.cos(th) * 3.5;
+  const ratio = rate / goal;
+  return html`<div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+    <svg viewBox="0 0 200 112" class="w-[190px] h-auto shrink-0" role="img" aria-label="Burn rate against ideal pace">
+      <path d="M${at(0)[0]} ${at(0)[1]} A${r} ${r} 0 0 1 ${at(1)[0]} ${at(1)[1]}" fill="none" class="stroke-line" stroke-width="8"/>
+      ${arc(0, Math.min(fr, fg), 'stroke-ok')}
+      ${arc(fg, fr, 'stroke-accent')}
+      <line x1=${t0x} y1=${t0y} x2=${t1x} y2=${t1y} class="stroke-ink" stroke-width="1.5"/>
+      <text x=${lx} y=${ly + 3} text-anchor="middle" font-size="10" class="fill-muted">ideal</text>
+      <polygon points="${cx + px},${cy + py} ${cx - px},${cy - py} ${tx},${ty}" class="fill-ink"/>
       <circle cx=${cx} cy=${cy} r="5" class="fill-ink"/>
     </svg>
-    <div class="font-heading text-4xl mt-1 ${over ? 'text-hot' : ''}">${fmt(rate)}/h</div>
-    <div class="text-sm text-muted">ideal ${fmt(goal)}/h</div>
-    <div class="mt-3 text-sm font-medium px-3 py-1.5 rounded-lg inline-block ${over ? 'bg-hot/10 text-hot' : 'bg-ok/10 text-ok'}">${verdict}</div>
-    ${burn.basis ? html`<p class="mt-2 text-xs text-muted">${burn.basis}</p>` : null}
+    <div class="text-center">
+      <div class="text-3xl font-semibold leading-8">${fmt(rate)}/h</div>
+      <div class="text-xs text-muted">ideal ${fmt(goal)}/h</div>
+      <div class="mt-2 text-xs font-medium px-2.5 py-1 rounded-full inline-block ${over ? 'bg-accent/10 text-accent' : 'bg-ok/10 text-ok'}">${over ? ratio.toFixed(1) + '× the sustainable pace' : 'On pace'}</div>
+    </div>
+    ${burn.basis ? html`<p class="basis-full text-center text-[11px] text-muted">${burn.basis}</p>` : null}
   </div>`;
 };
 
 const SourceToggle = ({sources, value, onChange}) => html`<div role="group" aria-label="Burn source"
   class="inline-flex p-0.5 rounded-lg bg-chip border border-line">
   ${sources.map(s => html`<button key=${s} type="button" aria-pressed=${s === value} onClick=${() => onChange(s)}
-    class="px-3 py-1 text-sm rounded-md ${s === value ? 'bg-card text-ink border border-line' : 'text-muted'}">${sourceLabel(s)}</button>`)}
+    class="px-2 py-0.5 text-xs rounded-md ${s === value ? 'bg-card text-ink border border-line' : 'text-muted'}">${sourceLabel(s)}</button>`)}
 </div>`;
 
 const ActNow = ({r}) => {
@@ -143,17 +163,19 @@ const ActNow = ({r}) => {
   const urgent = (r.issues ?? []).filter(i => i.priority === 1);
   if (!acts.length && !urgent.length) return html`<p class="text-sm text-muted">Nothing urgent.</p>`;
   return html`<ul class="divide-y divide-line">
-    ${acts.map(a => html`<li key=${a} class="flex gap-2 py-2 text-sm"><span class="text-hot">●</span><span>${a}</span></li>`)}
-    ${urgent.map(i => html`<li key=${i.title} class="flex items-start gap-3 py-2">
+    ${acts.map(a => html`<li key=${a} class="flex gap-2 py-1.5 text-xs"><span class="text-accent">●</span><span class="min-w-0" title=${a}>${a}</span></li>`)}
+    ${urgent.map(i => html`<li key=${i.title} class="flex items-center gap-2 py-1.5" title=${i.fix}>
       <div class="min-w-0 flex-1">
-        <div class="text-sm font-medium">${i.title}</div>
-        <div class="text-xs text-muted mt-0.5">${i.fix}</div>
+        <div class="text-xs font-medium truncate">${i.title}</div>
       </div>
       <${CopyButton} text=${i.prompt} label="Copy fix"
-        className="shrink-0 text-xs px-2 py-1 bg-chip rounded border border-line hover:border-accent" />
+        className="shrink-0 w-[4.5rem] text-center text-[11px] px-2 py-0.5 bg-chip rounded border border-line hover:border-accent" />
     </li>`)}
   </ul>`;
 };
+
+// Shared table header style.
+const TH = 'text-[11px] uppercase tracking-wide text-muted font-normal [&_th]:font-normal';
 
 const ActiveSessions = ({sessions, source}) => {
   // With the source toggle on, show only that source's sessions.
@@ -162,136 +184,161 @@ const ActiveSessions = ({sessions, source}) => {
     const who = source ? sourceLabel(source) + ' ' : '';
     return html`<p class="text-sm text-muted">No ${who}session had a turn in the last 30 minutes.</p>`;
   }
-  return html`<div class="overflow-x-auto -mx-2"><table class="w-full min-w-max text-sm">
-    <thead><tr class="text-left text-muted">
-      <th class="px-2 py-1 font-normal">Session</th><th class="px-2 font-normal">Model</th>
-      <th class="px-2 font-normal">Burn rate</th><th class="px-2 font-normal">Burn share</th>
-      <th class="px-2 font-normal">Context</th><th class="px-2 font-normal">Age (hours)</th>
-      <th class="px-2 font-normal">Idle</th><th class="px-2 font-normal">Flags</th>
+  return html`<div class="overflow-x-auto -mx-1"><table class="w-full min-w-max text-xs">
+    <thead><tr class="text-left ${TH}">
+      <th class="px-1 pb-1">Session</th><th class="px-1">Model</th>
+      <th class="px-1 text-right">Burn rate</th><th class="px-1">Burn share</th>
+      <th class="px-1 text-right">Context</th><th class="px-1 text-right">Age</th>
+      <th class="px-1 text-right">Idle</th><th class="px-1">Flags</th>
     </tr></thead>
     <tbody>${rows.map((s, i) => {
       const share = Number(s.rateShare) || 0;
       const hot = share >= 50;
-      return html`<tr key=${i} class="border-t border-line align-top">
-        <td class="px-2 py-1">${cut(s.title || '(untitled)', 44)}<div class="text-xs text-muted">${s.project ?? '?'} · ${s.id}</div></td>
-        <td class="px-2 py-1">${s.model
-          ? html`<span class="px-1.5 py-0.5 rounded text-xs bg-chip text-muted">${s.model.replace(/^claude-/, '')}</span>`
-          : '—'}</td>
-        <td class="px-2 py-1">${fmt(s.rate)}/h</td>
-        <td class="px-2 py-1 ${hot ? 'text-hot' : ''}">${sharePct(share)}
-          <div class="mt-1 h-1.5 w-20 rounded bg-line overflow-hidden"><div class="h-full ${hot ? 'bg-hot' : 'bg-bar'}" style=${{width: Math.min(100, Math.max(0, share)) + '%'}}></div></div></td>
-        <td class="px-2 py-1">${fmt(s.context)}</td>
-        <td class="px-2 py-1">${Number(s.hours || 0).toFixed(1)}h</td>
-        <td class="px-2 py-1">${Math.round(s.idle || 0)}m</td>
-        <td class="px-2 py-1"><div class="flex flex-wrap gap-1">${(s.flags ?? []).map(f => html`<span key=${f} title=${f}
-          class="px-1.5 py-0.5 rounded text-xs bg-hot/10 text-hot cursor-help">${f.split(':')[0]}</span>`)}</div></td>
+      return html`<tr key=${i} class="border-t border-line align-middle">
+        <td class="px-1 py-1 max-w-[16rem] min-w-[10rem]"><div class="truncate" title=${s.title || '(untitled)'}>${s.title || '(untitled)'}</div><div class="text-[11px] text-muted truncate">${s.project ?? '?'} · ${s.id}</div></td>
+        <td class="px-1 py-1 text-muted whitespace-nowrap">${s.model ? s.model.replace(/^claude-/, '') : '—'}</td>
+        <td class="px-1 py-1 text-right whitespace-nowrap">${fmt(s.rate)}/h</td>
+        <td class="px-1 py-1 whitespace-nowrap"><span class="${hot ? 'text-accent' : ''}">${sharePct(share)}</span>
+          <div class="mt-0.5 h-1 w-14 rounded bg-line overflow-hidden"><div class="h-full ${hot ? 'bg-accent' : 'bg-bar'}" style=${{width: Math.min(100, Math.max(0, share)) + '%'}}></div></div></td>
+        <td class="px-1 py-1 text-right">${fmt(s.context)}</td>
+        <td class="px-1 py-1 text-right whitespace-nowrap">${Number(s.hours || 0).toFixed(1)} h</td>
+        <td class="px-1 py-1 text-right whitespace-nowrap">${(s.idle || 0) < 1 ? 'now' : Math.round(s.idle) + ' m'}</td>
+        <td class="px-1 py-1"><div class="flex flex-wrap gap-1">${(s.flags ?? []).map(f => html`<span key=${f} title=${f}
+          class="px-1.5 rounded text-[10px] leading-4 bg-accent/10 text-accent cursor-help whitespace-nowrap">${f.split(':')[0]}</span>`)}</div></td>
       </tr>`;
     })}</tbody>
   </table></div>`;
 };
 
-const Card = ({title, right, className = '', children}) => html`<section class="card p-4 min-w-0 ${className}">
-  ${title || right ? html`<div class="flex items-center justify-between gap-2 mb-3">
-    <h2 class="font-heading text-lg">${title}</h2>${right}</div>` : null}
+const Card = ({title, right, className = '', children}) => html`<section class="card p-3 min-w-0 flex flex-col ${className}">
+  ${title || right ? html`<div class="flex items-center justify-between gap-2 mb-2 min-h-6">
+    <h2 class="text-sm font-semibold">${title}</h2>${right}</div>` : null}
   ${children}
 </section>`;
 
 // Small trend line. The dashed line marks the target. Lower is better for every series here.
-const Spark = ({values, target}) => {
+// Muted unless the tile is over its target.
+const Spark = ({values, target, over}) => {
   if (values.length < 2) return null;
-  const w = 100, h = 28, maxV = Math.max(...values, target ?? 0) || 1;
+  const w = 100, h = 20, maxV = Math.max(...values, target ?? 0) || 1;
   const x = (i) => (i / (values.length - 1)) * w;
   const y = (v) => h - 2 - (v / maxV) * (h - 4);
   const line = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(' ');
-  return html`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="w-full h-8 mt-2" aria-hidden="true">
-    <path d="${line} L${w},${h} L0,${h} Z" fill="#d97757" fill-opacity="0.12"/>
+  return html`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="w-full h-5 block" aria-hidden="true">
+    <path d="${line} L${w},${h} L0,${h} Z" fill-opacity="0.12" fill=${over ? '#d97757' : null} class=${over ? '' : 'fill-muted'}/>
     ${target != null ? html`<line x1="0" x2=${w} y1=${y(target)} y2=${y(target)} class="stroke-muted"
       stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>` : null}
-    <path d=${line} fill="none" stroke="#d97757" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    <path d=${line} fill="none" stroke=${over ? '#d97757' : null} class=${over ? '' : 'stroke-muted'} stroke-width="1.5" vector-effect="non-scaling-stroke"/>
   </svg>`;
 };
 
-// One KPI tile. state: 'hot' needs action now, 'ok' meets the target, null has no target.
-const Tile = ({label, value, sub, state, children}) => html`<div class="card p-3 flex flex-col min-w-0 border-t-4
-  ${state === 'hot' ? 'border-t-hot' : state === 'ok' ? 'border-t-ok' : 'border-t-line'}">
-  <div class="text-xs uppercase tracking-wide text-muted truncate" title=${label}>${label}</div>
-  <div class="tnum text-2xl font-semibold mt-1 ${state === 'hot' ? 'text-hot' : ''}">${value}</div>
-  <div class="text-xs text-muted truncate" title=${sub}>${sub}</div>
-  <div class="mt-auto">${children}</div>
+// One compact KPI tile. state: 'crit' needs action now, 'over' misses the target, 'ok' meets it, null has no target.
+const DOT = {crit: 'bg-hot', over: 'bg-accent', ok: 'bg-ok'};
+const Tile = ({label, value, line, tip, state, children}) => html`<div class="card px-2.5 py-2 flex flex-col min-w-0" title=${tip || label}>
+  <div class="flex items-center gap-1.5 min-w-0">
+    ${state ? html`<span class="size-1.5 shrink-0 rounded-full ${DOT[state]}"></span>` : null}
+    <span class="text-[11px] uppercase tracking-wide text-muted truncate" title=${label}>${label}</span>
+  </div>
+  <div class="flex items-baseline justify-between gap-2 min-w-0">
+    <span class="text-lg leading-6 font-semibold shrink-0 ${state === 'crit' ? 'text-hot' : ''}">${value}</span>
+    ${line ? html`<span class="text-[11px] text-muted truncate" title=${line}>${line}</span>` : null}
+  </div>
+  <div class="mt-auto pt-1 min-h-6 flex flex-col justify-end">${children}</div>
 </div>`;
 
 const hoursLabel = (h) => (h >= 48 ? (h / 24).toFixed(1) + ' d' : Math.round(h) + ' h');
+const dayTime = (d) => d.toLocaleDateString(undefined, {weekday: 'short'}) + ' ' + clock(d);
 
 // Week used against week elapsed: the bar is usage, the tick is where an even pace would be.
-const WeekBar = ({used, elapsed}) => html`<div class="relative mt-3 h-2 rounded bg-line" aria-hidden="true">
-  <div class="h-full rounded ${used > elapsed ? 'bg-hot' : 'bg-ok'}" style=${{width: Math.min(100, used) + '%'}}></div>
-  <div class="absolute -top-1 h-4 w-0.5 bg-ink" style=${{left: Math.min(100, elapsed) + '%'}}></div>
+const WeekBar = ({used, elapsed}) => html`<div class="relative h-1.5 rounded bg-line" title=${'even pace ' + Math.round(elapsed) + '%'} aria-hidden="true">
+  <div class="h-full rounded ${used > elapsed ? 'bg-accent' : 'bg-ok'}" style=${{width: Math.min(100, used) + '%'}}></div>
+  <div class="absolute -top-0.5 h-2.5 w-0.5 bg-ink" style=${{left: Math.min(100, elapsed) + '%'}}></div>
 </div>`;
+
+const Bar = ({pct, cls}) => html`<div class="h-1 rounded bg-line"><div class="h-full rounded ${cls}" style=${{width: Math.min(100, pct) + '%'}}></div></div>`;
 
 const KpiStrip = ({r, burn, source}) => {
   const rate = Number(burn?.rate) || 0, goal = Number(burn?.goal) || 0;
   const hourly = (r.timeline ?? []).slice(-24).map(t => (t[1] ?? 0) + (t[2] ?? 0));
   const used = burn?.used, left = burn?.hoursLeft;
-  const tiles = [html`<${Tile} key="burn" label="Burn rate, last hour" value=${fmt(rate) + '/h'}
-      sub=${goal ? `ideal ${fmt(goal)}/h · ${(rate / goal).toFixed(1)}× pace` : 'no ideal pace yet'}
-      state=${goal ? (rate > goal ? 'hot' : 'ok') : null}><${Spark} values=${hourly} target=${goal || null} /></${Tile}>`];
+  const overBurn = goal && rate > goal;
+  const tiles = [html`<${Tile} key="burn" label="Burn / hour" value=${fmt(rate) + '/h'}
+      line=${goal ? `ideal ${fmt(goal)}` : 'no ideal pace yet'}
+      tip=${goal ? `${(rate / goal).toFixed(1)}× the ideal pace of ${fmt(goal)}/h` : 'no ideal pace yet'}
+      state=${goal ? (overBurn ? 'over' : 'ok') : null}><${Spark} values=${hourly} target=${goal || null} over=${overBurn} /></${Tile}>`];
   if (used != null && left != null) {
     const elapsed = 100 * (1 - left / 168);
     // Tokens left at reset: goal is the remaining budget spread over the hours left.
     const dry = rate > 0 ? (goal * left) / rate : Infinity;
+    const crit = dry <= left;
     const reset = burn.resets ? toDate(burn.resets) : null;
     const g = burn.gains ?? {};
-    const gain = (h, name) => (g[h] == null ? null : `+${Number(g[h]).toFixed(g[h] >= 10 ? 0 : 1)} pts ${name}`);
-    const gains = [gain(1, '1 h'), gain(6, '6 h'), gain(24, '24 h')].filter(Boolean).join(' · ');
-    tiles.push(html`<${Tile} key="week" label="Weekly limit used" value=${Math.round(used) + '%'}
-        sub=${gains || 'no recent spend'} state=${used > elapsed ? 'hot' : 'ok'}>
-        <${WeekBar} used=${used} elapsed=${elapsed} />
-        <div class="text-xs text-muted mt-1">${Math.round(elapsed)}% of the week gone (tick)</div></${Tile}>`,
-      html`<${Tile} key="dry" label="At this burn, runs out in" value=${dry > left ? 'never' : hoursLabel(dry)}
-        sub=${'reset in ' + hoursLabel(left) + (reset ? ' · ' + reset.toLocaleDateString(undefined, {weekday: 'short'}) + ' ' + clock(reset) : '')}
-        state=${dry > left ? 'ok' : 'hot'} />`);
+    // Even pace spends 100/168 pts per hour.
+    const gain = (h) => (g[h] == null ? null : `+${Number(g[h]).toFixed(g[h] >= 10 ? 0 : 1)} pts in ${h} h (even pace ${(100 * h / 168).toFixed(1)})`);
+    const gains = [1, 6, 24].map(gain).filter(Boolean);
+    const key = [6, 24, 1].find(h => g[h] != null);
+    tiles.push(html`<${Tile} key="week" label="Weekly limit" value=${Math.round(used) + '%'}
+        line=${key ? gain(key).replace(/ \(.*/, '') : 'no recent spend'}
+        tip=${(gains.join(' · ') || 'no recent spend') + ` · even pace ${Math.round(elapsed)}% of the week gone`}
+        state=${used > elapsed ? 'over' : 'ok'}><${WeekBar} used=${used} elapsed=${elapsed} /></${Tile}>`);
+    const scale = Math.max(isFinite(dry) ? dry : 0, left);
+    const empty = crit ? new Date(Date.now() + dry * 3600e3) : null;
+    tiles.push(html`<${Tile} key="dry" label="Runs out in" value=${crit ? hoursLabel(dry) : 'never'}
+        line=${crit ? '~' + dayTime(empty) : 'no run-out'}
+        tip=${`At this burn: ${crit ? 'empty ~' + dayTime(empty) : 'budget lasts the week'} · reset in ${hoursLabel(left)}${reset ? ' · ' + dayTime(reset) : ''}`}
+        state=${crit ? 'crit' : 'ok'}>
+        <div class="space-y-0.5" aria-hidden="true">
+          <${Bar} pct=${100 * Math.min(dry, scale) / scale} cls=${crit ? 'bg-hot' : 'bg-ok'} />
+          <${Bar} pct=${100 * left / scale} cls="bg-muted opacity-60" />
+        </div></${Tile}>`);
   } else {
-    tiles.push(html`<${Tile} key="week" label="Weekly limit used" value="—"
-      sub="no subscription reading yet" state=${null} />`);
+    tiles.push(html`<${Tile} key="week" label="Weekly limit" value="—"
+      line="no subscription reading yet" state=${null} />`);
   }
   const over = Number(r.over300k) || 0;
   const overHourly = (r.timeline ?? []).slice(-24).map(t => 100 * (t[2] ?? 0) / (((t[1] ?? 0) + (t[2] ?? 0)) || 1));
-  tiles.push(html`<${Tile} key="over" label="Spend over 300k context" value=${Math.round(over) + '%'}
-    sub=${fmt(r.total) + ' total · ' + (r.days ?? 0) + ' d'} state=${over >= 50 ? 'hot' : 'ok'}>
-    <${Spark} values=${overHourly} target=${50} /></${Tile}>`);
+  tiles.push(html`<${Tile} key="over" label="Spend >300k" value=${Math.round(over) + '%'}
+    line=${fmt(r.total) + ' · ' + (r.days ?? 0) + ' d'} tip=${'Spend over 300k context · ' + fmt(r.total) + ' tokens in ' + (r.days ?? 0) + ' d'}
+    state=${over >= 50 ? 'over' : 'ok'}>
+    <${Spark} values=${overHourly} target=${50} over=${over >= 50} /></${Tile}>`);
   for (const k of r.kpis ?? []) {
     const vals = k.values ?? [], last = vals[vals.length - 1];
-    tiles.push(html`<${Tile} key=${k.name} label=${k.name} value=${last == null ? '—' : kpiFmt(k, last)}
-      sub=${k.target != null ? 'target ' + kpiFmt(k, k.target) : ''}
-      state=${k.target == null || last == null ? null : last > k.target ? 'hot' : 'ok'}>
-      <${Spark} values=${vals} target=${k.target ?? null} /></${Tile}>`);
+    const isOver = k.target != null && last != null && last > k.target;
+    tiles.push(html`<${Tile} key=${k.name} label=${SHORT[k.name] ?? k.name} tip=${k.name + (k.target != null ? ' · target ' + kpiFmt(k, k.target) : '')} value=${last == null ? '—' : kpiFmt(k, last)}
+      line=${k.target != null ? 'target ' + kpiFmt(k, k.target) : ''}
+      state=${k.target == null || last == null ? null : isOver ? 'over' : 'ok'}>
+      <${Spark} values=${vals} target=${k.target ?? null} over=${isOver} /></${Tile}>`);
   }
   const active = (r.active ?? []).filter(s => !source || s.source === source);
   const top = active[0];
   tiles.push(html`<${Tile} key="active" label="Active sessions" value=${active.length}
-    sub=${top ? `top: ${cut(top.title || top.id, 22)} ${sharePct(top.rateShare)}` : 'none in the last 30 min'}
-    state=${top && top.rateShare >= 50 && rate > goal ? 'hot' : null} />`);
-  return html`<div class="grid gap-3 grid-cols-2 md:grid-cols-4">${tiles}</div>`;
+    line=${top ? `top ${Math.round(top.rateShare)}%` : 'none in 30 min'}
+    tip=${top ? 'Top burner: ' + (top.title || top.id) : 'No session had a turn in the last 30 minutes'}
+    state=${top && top.rateShare >= 50 && overBurn ? 'over' : null}>
+    ${top ? html`<div class="text-[11px] truncate" title=${top.title || top.id}>${top.title || top.id}</div>` : null}</${Tile}>`);
+  return html`<div class="grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">${tiles}</div>`;
 };
 
 const Dashboard = ({r, burn, sources, source, onSource}) => {
   const toggle = sources.length > 1
     ? html`<${SourceToggle} sources=${sources} value=${source} onChange=${onSource} />` : null;
-  return html`<div class="space-y-4">
-    <${KpiStrip} r=${r} burn=${burn} source=${sources.length > 1 ? source : null} />
-    <div class="grid gap-4 lg:grid-cols-3">
-      <${Card} title="Burn, last hour" right=${toggle}><${Gauge} burn=${burn} /></${Card}>
+  return html`<div class="space-y-3">
+    <div class="grid gap-3 lg:grid-cols-3">
+      <${Card} title="Burn, last hour" right=${toggle}><div class="flex-1 flex items-center justify-center"><${Gauge} burn=${burn} /></div></${Card}>
       <${Card} title="Burndown" className="lg:col-span-2">
         <${Burndown} rows=${r.burndown ?? []} budget=${r.budget} benchWindow=${r.benchWindow} />
       </${Card}>
-      <${Card} title="Hourly spend by context" className="lg:col-span-2 flex flex-col">
-        <${Hourly} rows=${r.timeline ?? []} goal=${burn?.goal} />
-      </${Card}>
-      <${Card} title="Act now"><${ActNow} r=${r} /></${Card}>
     </div>
-    <${Card} title="Active sessions">
-      <${ActiveSessions} sessions=${r.active ?? []} source=${sources.length > 1 ? source : null} />
+    <${KpiStrip} r=${r} burn=${burn} source=${sources.length > 1 ? source : null} />
+    <${Card} title="Hourly spend by context">
+      <${Hourly} rows=${r.timeline ?? []} goal=${burn?.goal} />
     </${Card}>
+    <div class="grid gap-3 lg:grid-cols-5">
+      <${Card} title="Act now" className="lg:col-span-2"><${ActNow} r=${r} /></${Card}>
+      <${Card} title="Active sessions" className="lg:col-span-3">
+        <${ActiveSessions} sessions=${r.active ?? []} source=${sources.length > 1 ? source : null} />
+      </${Card}>
+    </div>
   </div>`;
 };
 
@@ -299,7 +346,7 @@ const badge = (p) => (p === 1 ? 'bg-hot/10 text-hot' : p === 2 ? 'bg-accent/10 t
 
 const LeakRow = ({i}) => {
   const meta = i.share == null ? 'config check' : `${sharePct(i.share)} of spend · ${plural(i.sessions ?? 0, 'session')}`;
-  return html`<div class="card p-4">
+  return html`<${Card}>
     <div class="flex flex-wrap items-center gap-2">
       <span class="text-xs font-bold px-2 py-0.5 rounded ${badge(i.priority)}">P${i.priority}</span>
       <span class="font-medium">${i.title}</span>
@@ -313,12 +360,12 @@ const LeakRow = ({i}) => {
       <pre class="mt-2 p-2 whitespace-pre-wrap break-words bg-bg rounded border border-line">${i.prompt}</pre>
     </details>
     <div class="mt-3"><${CopyButton} text=${i.prompt} label="Copy"
-      className="text-xs px-2 py-1 bg-chip rounded hover:bg-accent/10" /></div>
-  </div>`;
+      className="text-xs px-2 py-1 bg-chip rounded border border-line hover:border-accent" /></div>
+  </${Card}>`;
 };
 
 const Leaks = ({issues}) => {
-  if (!issues.length) return html`<div class="card p-4"><p class="text-sm text-muted">No leaks detected.</p></div>`;
+  if (!issues.length) return html`<${Card}><p class="text-sm text-muted">No leaks detected.</p></${Card}>`;
   const all = issues.map(i => i.prompt).filter(Boolean).join('\n\n');
   return html`<div class="space-y-4">
     <div><${CopyButton} text=${all} label="Copy all fixes for Claude"
@@ -330,28 +377,41 @@ const Leaks = ({issues}) => {
 // Cumulative burn over time. Dashed: the same turns with context capped at benchWindow.
 // Dotted: a straight line that spends the weekly budget at a steady pace.
 const Burndown = ({rows, budget, benchWindow}) => {
+  const [ref, {w, h}] = useSize();
   if (!rows.length) return html`<p class="text-sm text-muted">No burndown data.</p>`;
   const t = rows.map(d => toDate(d[0]).getTime());
   const t0 = t[0], n = rows.length - 1, span = Math.max(t[n] - t0, 1);
   const paceEnd = budget ? budget * span / WEEK_MS : 0;
-  const maxV = Math.max(paceEnd, ...rows.map(d => Math.max(d[1] ?? 0, d[2] ?? 0))) || 1;
-  const w = 640, h = 190, l = 44, rt = 12, b = 22;
+  const peak = Math.max(paceEnd, ...rows.map(d => Math.max(d[1] ?? 0, d[2] ?? 0))) || 1;
+  // Round step (1, 2 or 5 x 10^k) giving at most 4 gridlines; the axis tops out on a round value.
+  const mag = 10 ** Math.floor(Math.log10(peak / 4));
+  const step = [1, 2, 5, 10].map(m => m * mag).find(v => peak / v <= 4);
+  const maxV = Math.ceil(peak / step - 1e-9) * step;
+  const l = 44, rt = 10, tp = 8, b = 20;
   const x = (i) => l + ((t[i] - t0) / span) * (w - l - rt);
-  const y = (v) => h - b - (v / maxV) * (h - b - rt);
+  const y = (v) => h - b - (v / maxV) * (h - b - tp);
   const path = (k) => rows.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d[k] ?? 0).toFixed(1)}`).join(' ');
   const last = rows[n];
-  return html`<div>
-    <svg viewBox="0 0 ${w} ${h}" class="w-full h-auto" role="img" aria-label="Cumulative burn">
-      <line x1=${l} y1=${h - b} x2=${w - rt} y2=${h - b} class="stroke-line"/>
-      <line x1=${l} y1=${rt} x2=${l} y2=${h - b} class="stroke-line"/>
-      <text x=${l - 6} y=${rt + 8} text-anchor="end" font-size="10" class="fill-muted">${fmt(maxV)}</text>
-      <text x=${l} y=${h - 6} font-size="10" class="fill-muted">${dayLabel(new Date(t0))}</text>
-      <text x=${w - rt} y=${h - 6} text-anchor="end" font-size="10" class="fill-muted">${dayLabel(new Date(t[n]))}</text>
-      ${budget ? html`<line x1=${x(0)} y1=${y(0)} x2=${x(n)} y2=${y(paceEnd)} class="stroke-muted" stroke-dasharray="1 3" stroke-width="1.5"/>` : null}
-      <path d=${path(2)} fill="none" class="stroke-muted" stroke-width="1.5" stroke-dasharray="4 3"/>
-      <path d=${path(1)} fill="none" stroke="#d97757" stroke-width="2"/>
-    </svg>
-    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted mt-2">
+  const ticks = Array.from({length: Math.round(maxV / step)}, (_, i) => (i + 1) * step / maxV);
+  const mid = new Date(t0 + span / 2);
+  return html`<div class="flex-1 flex flex-col">
+    <div ref=${ref} class="relative flex-1 min-h-[8rem]">
+      ${w > 0 ? html`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="absolute inset-0 w-full h-full" role="img" aria-label="Cumulative burn">
+        ${ticks.map(f => html`<g key=${f}>
+          <line x1=${l} x2=${w - rt} y1=${y(maxV * f)} y2=${y(maxV * f)} class="stroke-line"/>
+          <text x=${l - 6} y=${y(maxV * f) + 4} text-anchor="end" font-size="10" class="fill-muted">${fmt(maxV * f).replace(/\.0(?=[a-zA-Z])/, '')}</text>
+        </g>`)}
+        <line x1=${l} y1=${h - b} x2=${w - rt} y2=${h - b} class="stroke-muted"/>
+        <text x=${l - 6} y=${h - b + 4} text-anchor="end" font-size="10" class="fill-muted">0</text>
+        <text x=${l} y=${h - 6} font-size="10" class="fill-muted">${dayLabel(new Date(t0))}</text>
+        <text x=${(l + w - rt) / 2} y=${h - 6} text-anchor="middle" font-size="10" class="fill-muted">${dayLabel(mid)}</text>
+        <text x=${w - rt} y=${h - 6} text-anchor="end" font-size="10" class="fill-muted">${dayLabel(new Date(t[n]))}</text>
+        ${budget ? html`<line x1=${x(0)} y1=${y(0)} x2=${x(n)} y2=${y(paceEnd)} class="stroke-muted" stroke-dasharray="1 3" stroke-width="1.5"/>` : null}
+        <path d=${path(2)} fill="none" class="stroke-muted" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <path d=${path(1)} fill="none" stroke="#d97757" stroke-width="2"/>
+      </svg>` : null}
+    </div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted mt-1">
       <span><span class="inline-block w-4 border-t-2 border-accent align-middle"></span> actual ${fmt(last[1])}</span>
       <span><span class="inline-block w-4 border-t-2 border-dashed border-muted align-middle"></span> benchmark ${fmt(last[2])} (context capped at ${fmt(benchWindow)})</span>
       ${budget ? html`<span><span class="inline-block w-4 border-t-2 border-dotted border-muted align-middle"></span> weekly budget pace</span>` : null}
@@ -363,30 +423,38 @@ const Burndown = ({rows, budget, benchWindow}) => {
 const Hourly = ({rows, goal}) => {
   if (!rows.length) return html`<p class="text-sm text-muted">No timeline data.</p>`;
   const step = 7, bw = 5, h = 100, base = 100, top = 4;
-  const w = rows.length * step;
+  const n = rows.length, w = n * step;
   const max = Math.max(goal || 0, ...rows.map(t => (t[1] ?? 0) + (t[2] ?? 0))) || 1;
   const scale = (v) => (v / max) * (base - top);
   const hourLabel = (iso) => dayLabel(toDate(iso)) + ' ' + clock(toDate(iso));
-  return html`<div class="flex-1 flex flex-col">
-    <div class="flex-1 flex flex-col">
-      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="w-full flex-1 min-h-[11rem]" role="img" aria-label="Hourly spend">
+  // One tick per local midnight, away from the end labels.
+  const days = rows.map((t, i) => [toDate(t[0]), i]).filter(([d, i]) => d.getHours() === 0 && i > n * 0.08 && i < n * 0.92);
+  return html`<div class="flex flex-col">
+    <div class="relative min-h-[7.5rem] h-[7.5rem] sm:h-[9rem]">
+      <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="absolute inset-0 w-full h-full" role="img" aria-label="Hourly spend">
+        ${[0.5, 1].map(f => html`<line key=${f} x1="0" x2=${w} y1=${base - scale(max * f)} y2=${base - scale(max * f)}
+          class="stroke-line" stroke-width="1" vector-effect="non-scaling-stroke"/>`)}
         ${rows.map((t, i) => {
           const cool = scale(t[1] ?? 0), hot = scale(t[2] ?? 0), x = i * step + 1;
           return html`<g key=${t[0]}>
-            <rect x=${x} y=${base - cool} width=${bw} height=${cool} fill="#6a9bcc" rx="1"/>
-            <rect x=${x} y=${base - cool - hot} width=${bw} height=${hot} fill="#c0453a" rx="1"/>
+            <rect x=${x} y=${base - cool} width=${bw} height=${cool} fill="#6a9bcc" fill-opacity="0.85" rx="1"/>
+            <rect x=${x} y=${base - cool - hot} width=${bw} height=${hot} fill="#d97757" fill-opacity="0.85" rx="1"/>
           </g>`;
         })}
         ${goal ? html`<line x1="0" x2=${w} y1=${base - scale(goal)} y2=${base - scale(goal)} stroke="#788c5d"
           stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>` : null}
       </svg>
-      <div class="flex justify-between text-xs text-muted border-t border-line pt-1">
-        <span>${hourLabel(rows[0][0])}</span><span>max ${fmt(max)}/h</span><span>${hourLabel(rows[rows.length - 1][0])}</span>
-      </div>
+      <span class="absolute left-1 top-0 text-[11px] text-muted bg-card/80 px-1 rounded">${fmt(max)}/h</span>
+      <span class="absolute left-1 text-[11px] text-muted bg-card/80 px-1 rounded" style=${{top: 'calc(50% - 0.5rem)'}}>${fmt(max / 2)}/h</span>
     </div>
-    <div class="flex gap-4 text-xs text-muted mt-2">
-      <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-bar"></span>under 300k context</span>
-      <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-hot"></span>over 300k context</span>
+    <div class="relative h-5 border-t border-line text-[11px] text-muted">
+      <span class="absolute left-0 top-0.5">${hourLabel(rows[0][0])}</span>
+      ${days.map(([d, i]) => html`<span key=${i} class="absolute top-0.5 -translate-x-1/2 hidden sm:block" style=${{left: (100 * (i + 0.5) / n) + '%'}}>${dayLabel(d)}</span>`)}
+      <span class="absolute right-0 top-0.5">${hourLabel(rows[n - 1][0])}</span>
+    </div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted mt-1">
+      <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-bar"></span>under 300k context</span>
+      <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-accent opacity-85"></span>over 300k context</span>
       ${goal ? html`<span class="flex items-center gap-1"><span class="inline-block w-4 border-t-2 border-dashed border-ok"></span>ideal ${fmt(goal)}/h</span>` : null}
     </div>
   </div>`;
@@ -394,39 +462,37 @@ const Hourly = ({rows, goal}) => {
 
 // Failed checks sort first.
 const Baseline = ({rows}) => {
-  if (!rows.length) return html`<p class="text-sm text-muted">No baseline checks.</p>`;
+  if (!rows.length) return html`<${Card}><p class="text-sm text-muted">No baseline checks.</p></${Card}>`;
   const sorted = [...rows].sort((a, b) => Number(a.ok) - Number(b.ok));
-  return html`<div class="card p-2 overflow-x-auto"><table class="w-full text-sm">
-    <thead><tr class="text-left text-muted">
-      <th class="px-2 py-1 font-normal">Status</th><th class="px-2 font-normal">Check</th>
-      <th class="px-2 font-normal">Now</th><th class="px-2 font-normal">Target</th>
+  return html`<${Card} title="Baseline checks"><div class="overflow-x-auto -mx-2"><table class="w-full text-sm">
+    <thead><tr class="text-left ${TH}">
+      <th class="px-2 py-1.5">Status</th><th class="px-2">Check</th><th class="px-2">Now</th><th class="px-2">Target</th>
     </tr></thead>
     <tbody>${sorted.map(row => html`<tr key=${row.name} class="border-t border-line">
-      <td class="px-2 py-1 font-bold ${row.ok ? 'text-ok' : 'text-hot'}">${row.ok ? '✓' : '✗'}</td>
-      <td class="px-2 py-1">${row.name}</td>
-      <td class="px-2 py-1">${row.now}</td>
-      <td class="px-2 py-1 text-muted">${row.target}</td>
+      <td class="px-2 py-2 font-bold ${row.ok ? 'text-ok' : 'text-hot'}">${row.ok ? '✓' : '✗'}</td>
+      <td class="px-2 py-2">${row.name}</td>
+      <td class="px-2 py-2">${row.now}</td>
+      <td class="px-2 py-2 text-muted">${row.target}</td>
     </tr>`)}</tbody>
-  </table></div>`;
+  </table></div></${Card}>`;
 };
 
-const SimpleTable = ({headers, rows}) => html`<div class="overflow-x-auto"><table class="w-full text-sm">
-  <thead><tr>${headers.map(h => html`<th key=${h} class="px-2 py-1 text-left font-normal text-muted">${h}</th>`)}</tr></thead>
+const SimpleTable = ({headers, rows}) => html`<div class="overflow-x-auto -mx-2"><table class="w-full text-sm">
+  <thead><tr class=${TH}>${headers.map(h => html`<th key=${h} class="px-2 py-1.5 text-left">${h}</th>`)}</tr></thead>
   <tbody>${rows.map((row, i) => html`<tr key=${i} class="border-t border-line align-top">
-    ${row.map((c, j) => html`<td key=${j} class="px-2 py-1">${c}</td>`)}
+    ${row.map((c, j) => html`<td key=${j} class="px-2 py-2">${c}</td>`)}
   </tr>`)}</tbody>
 </table></div>`;
 
-const Block = ({title, headers, rows}) => (rows.length ? html`<section class="card p-4">
-  <h3 class="font-heading text-lg mb-2">${title}</h3>
+const Block = ({title, headers, rows}) => (rows.length ? html`<${Card} title=${title}>
   <${SimpleTable} headers=${headers} rows=${rows} />
-</section>` : null);
+</${Card}>` : null);
 
 const Details = ({r}) => {
   const unpriced = r.unpriced ?? null;
   const blocks = [
     {title: 'Top sessions', headers: ['Project', 'ID', 'Title', 'Share', 'Turns', 'Peak', 'Hours'],
-     rows: (r.topSessions ?? []).map(s => [s.project ?? '?', s.id ?? '', cut(s.title || s.id, 30), sharePct(s.share),
+     rows: (r.topSessions ?? []).map(s => [s.project ?? '?', s.id ?? '', html`<div class="truncate max-w-[22rem]" title=${s.title || s.id}>${s.title || s.id}</div>`, sharePct(s.share),
        s.turns ?? 0, fmt(s.peak), Number(s.hours || 0).toFixed(1) + 'h'])},
     {title: 'Context size buckets', headers: ['Bucket', 'Type', 'Share', 'Turns'],
      rows: (r.buckets ?? []).map(b => [b.label, b.hot ? 'over 300k' : 'under 300k', sharePct(b.share), b.turns ?? 0])},
@@ -439,10 +505,24 @@ const Details = ({r}) => {
     {title: unpriced ? `Unpriced models (${sharePct(unpriced[0])} of spend)` : 'Unpriced models', headers: ['Model', 'Turns'],
      rows: (unpriced?.[1] ?? []).map(([m, c]) => [m, c])},
   ];
-  if (!blocks.some(b => b.rows.length)) return html`<p class="text-sm text-muted">No detail data.</p>`;
-  return html`<div class="space-y-6">
+  if (!blocks.some(b => b.rows.length)) return html`<${Card}><p class="text-sm text-muted">No detail data.</p></${Card}>`;
+  return html`<div class="space-y-4">
     ${blocks.map(b => html`<${Block} key=${b.title} title=${b.title} headers=${b.headers} rows=${b.rows} />`)}
   </div>`;
+};
+
+// Age of the report. Ticks every second; the title holds the absolute time.
+const Updated = ({iso}) => {
+  const [, tick] = React.useReducer((x) => x + 1, 0);
+  React.useEffect(() => {
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const d = iso ? toDate(iso) : null;
+  if (!d || isNaN(d)) return html`<span>no report yet</span>`;
+  const s = Math.max(0, Math.round((Date.now() - d) / 1000));
+  const age = s < 60 ? s + ' s' : s < 3600 ? Math.floor(s / 60) + ' min' : Math.floor(s / 3600) + ' h';
+  return html`<span title=${stamp(iso)}>updated ${age} ago</span>`;
 };
 
 const App = () => {
@@ -473,7 +553,17 @@ const App = () => {
     };
     load();
     const timer = setInterval(load, 60000);
-    return () => clearInterval(timer);
+    // Reload when the page source changes. The raw page costs the server no report rebuild.
+    const pageText = async () => (await fetch('/dashboard.html', {cache: 'no-store'})).text();
+    let first = null;
+    const watch = setInterval(async () => {
+      try {
+        const now = await pageText();
+        if (first === null) first = now;
+        else if (now !== first) location.reload();
+      } catch (e) { /* server busy or gone: try again next tick */ }
+    }, 2000);
+    return () => { clearInterval(timer); clearInterval(watch); };
   }, []);
 
   const burns = report.burns ?? (report.burn ? {claude: report.burn} : {});
@@ -488,19 +578,19 @@ const App = () => {
   };
   const linkClass = link === 'offline' ? 'bg-hot/10 text-hot' : link === 'live' ? 'bg-ok/10 text-ok' : 'bg-chip text-muted';
 
-  return html`<div class="max-w-6xl mx-auto px-4 py-4">
-    <header class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-line">
-      <div class="flex items-center gap-2"><span class="text-accent text-xl">✻</span><h1 class="font-heading text-xl">Claude Token Doctor</h1></div>
-      <div class="flex flex-wrap items-center gap-2 text-sm text-muted">
-        <span class="text-xs px-2 py-0.5 rounded ${linkClass}">${link}</span>
-        <span>generated ${stamp(report.generated)} · ${report.days ?? 0}-day window</span>
+  return html`<div class="max-w-7xl mx-auto px-4 pb-3">
+    <header class="flex flex-wrap items-stretch gap-x-5 border-b border-line">
+      <div class="flex items-center gap-2 py-2.5"><span class="text-accent text-lg">✻</span><h1 class="font-heading text-lg">Claude Token Doctor</h1></div>
+      <nav class="flex order-last w-full sm:order-none sm:w-auto">
+        ${TABS.map(([id, name]) => html`<a key=${id} href="#${id}"
+          class="flex items-center px-3 text-sm -mb-px border-b-2 ${id === tabId ? 'border-accent text-ink' : 'border-transparent text-muted hover:text-ink'}">${name}</a>`)}
+      </nav>
+      <div class="ml-auto flex items-center gap-2 text-xs text-muted py-2.5">
+        <span class="px-2 py-0.5 rounded ${linkClass}">${link}</span>
+        <${Updated} iso=${report.generated} /><span>· ${report.days ?? 0}-day window</span>
       </div>
     </header>
-    <nav class="flex flex-wrap gap-1 border-b border-line">
-      ${TABS.map(([id, name]) => html`<a key=${id} href="#${id}"
-        class="px-3 py-2 text-sm -mb-px border-b-2 ${id === tabId ? 'border-accent text-ink' : 'border-transparent text-muted hover:text-ink'}">${name}</a>`)}
-    </nav>
-    <main class="mt-4">${bodies[tabId]}</main>
+    <main class="mt-3">${bodies[tabId]}</main>
   </div>`;
 };
 
