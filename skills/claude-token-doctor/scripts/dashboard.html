@@ -40,7 +40,9 @@ html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: s
 const {React, ReactDOM, htm} = window;
 const html = htm.bind(React.createElement);
 const WEEK_MS = 7 * 24 * 3600e3;
-const TABS = [['dashboard', 'Dashboard'], ['leaks', 'Leaks'], ['baseline', 'Baseline'], ['details', 'Details']];
+const TABS = [['dashboard', 'Dashboard'], ['checkup', 'Checkup'], ['sessions', 'Sessions']];
+// Old hashes keep working.
+const TAB_ALIAS = {leaks: 'checkup', baseline: 'checkup', details: 'sessions'};
 const serving = location.protocol.startsWith('http');
 
 // Formatting helpers. Each one accepts missing values.
@@ -304,7 +306,7 @@ const KpiStrip = ({r, burn, source}) => {
   for (const k of r.kpis ?? []) {
     const vals = k.values ?? [], last = vals[vals.length - 1];
     const isOver = k.target != null && last != null && last > k.target;
-    tiles.push(html`<${Tile} key=${k.name} label=${SHORT[k.name] ?? k.name} tip=${k.name + (k.target != null ? ' · target ' + kpiFmt(k, k.target) : '')} value=${last == null ? '—' : kpiFmt(k, last)}
+    tiles.push(html`<${Tile} key=${k.name} label=${SHORT[k.name] ?? k.name} tip=${k.name + ' · latest 3 h block' + (k.target != null ? ' · target ' + kpiFmt(k, k.target) : '')} value=${last == null ? '—' : kpiFmt(k, last)}
       line=${k.target != null ? 'target ' + kpiFmt(k, k.target) : ''}
       state=${k.target == null || last == null ? null : isOver ? 'over' : 'ok'}>
       <${Spark} values=${vals} target=${k.target ?? null} over=${isOver} /></${Tile}>`);
@@ -374,14 +376,14 @@ const LeakRow = ({i, open, onToggle}) => {
   </li>`;
 };
 
-const Leaks = ({issues, topCount}) => {
+const Leaks = ({issues, hours}) => {
   const [open, setOpen] = React.useState(null);
-  if (!issues.length) return html`<${Card}><p class="text-sm text-muted">No leaks detected.</p></${Card}>`;
+  if (!issues.length) return html`<${Card} title="Leaks"><p class="text-sm text-muted">No leaks in the last ${hours} h.</p></${Card}>`;
   const all = issues.map(i => i.prompt).filter(Boolean).join('\n\n');
   const copyAll = html`<${CopyButton} text=${all} label="Copy all fixes"
     className="text-xs px-2.5 py-1 bg-chip rounded-lg border border-line hover:border-accent" />`;
   return html`<${Card} title="Leaks" right=${copyAll}>
-    <p class="text-xs text-muted mb-2">From the ${topCount ? topCount + ' ' : ''}top-spend sessions in the window. One session can trigger several leaks, so the shares overlap.</p>
+    <p class="text-xs text-muted mb-2">From sessions active in the last ${hours} h. One session can trigger several leaks, so the shares overlap.</p>
     <ul>${issues.map(i => html`<${LeakRow} key=${i.title} i=${i} open=${open === i.title}
       onToggle=${() => setOpen(open === i.title ? null : i.title)} />`)}</ul>
   </${Card}>`;
@@ -473,21 +475,26 @@ const Hourly = ({rows, goal}) => {
   </div>`;
 };
 
-// Failed checks sort first.
-const Baseline = ({rows}) => {
-  if (!rows.length) return html`<${Card}><p class="text-sm text-muted">No baseline checks.</p></${Card}>`;
+// Failed checks sort first. A green arrow marks a 24 h value that beats the whole-window value (lower is better).
+const Checks = ({rows, hours, days}) => {
+  if (!rows.length) return null;
   const sorted = [...rows].sort((a, b) => Number(a.ok) - Number(b.ok));
-  return html`<${Card} title="Baseline checks"><div class="overflow-x-auto -mx-2"><table class="w-full text-sm">
-    <thead><tr class="text-left ${TH}">
-      <th class="px-2 py-1.5">Status</th><th class="px-2">Check</th><th class="px-2">Now</th><th class="px-2">Target</th>
-    </tr></thead>
-    <tbody>${sorted.map(row => html`<tr key=${row.name} class="border-t border-line">
-      <td class="px-2 py-2 font-bold ${row.ok ? 'text-ok' : 'text-hot'}">${row.ok ? '✓' : '✗'}</td>
-      <td class="px-2 py-2">${row.name}</td>
-      <td class="px-2 py-2">${row.now}</td>
-      <td class="px-2 py-2 text-muted">${row.target}</td>
-    </tr>`)}</tbody>
-  </table></div></${Card}>`;
+  const better = (row) => parseFloat(row.now_24h) < parseFloat(row.value_7d);
+  return html`<${Card} title="Checks">
+    <p class="text-xs text-muted mb-1">Checks and leaks use the last ${hours} h. The ${days}-day value is shown in grey.</p>
+    <div class="overflow-x-auto -mx-2"><table class="w-full text-sm tabular-nums">
+      <thead><tr class="text-left whitespace-nowrap ${TH}">
+        <th class="px-2 py-1">Check</th><th class="px-2">Last ${hours} h</th><th class="px-2">${days} d</th><th class="px-2 hidden sm:table-cell">Target</th><th class="px-2"><span class="sr-only sm:not-sr-only">Status</span></th>
+      </tr></thead>
+      <tbody>${sorted.map(row => html`<tr key=${row.name} class="border-t border-line">
+        <td class="px-2 py-1">${row.name}<div class="sm:hidden text-[11px] text-muted">${row.target}</div></td>
+        <td class="px-2 py-1 whitespace-nowrap">${row.now_24h}${better(row) ? html` <span class="text-ok" title=${'Better than the ' + days + '-day value'}>↓</span>` : null}</td>
+        <td class="px-2 py-1 text-muted whitespace-nowrap">${row.value_7d ?? ''}</td>
+        <td class="px-2 py-1 text-muted whitespace-nowrap hidden sm:table-cell">${row.target}</td>
+        <td class="px-2 py-1 whitespace-nowrap" title=${row.ok ? 'ok' : 'fix'}><span class="inline-block size-2 rounded-full sm:mr-1.5 ${row.ok ? 'bg-ok' : 'bg-accent'}"></span><span class="hidden sm:inline">${row.ok ? 'ok' : 'fix'}</span></td>
+      </tr>`)}</tbody>
+    </table></div>
+  </${Card}>`;
 };
 
 const SimpleTable = ({headers, rows}) => html`<div class="overflow-x-auto -mx-2"><table class="w-full text-sm">
@@ -501,7 +508,7 @@ const Block = ({title, headers, rows}) => (rows.length ? html`<${Card} title=${t
   <${SimpleTable} headers=${headers} rows=${rows} />
 </${Card}>` : null);
 
-const Details = ({r}) => {
+const Sessions = ({r}) => {
   const unpriced = r.unpriced ?? null;
   const blocks = [
     {title: 'Top sessions', headers: ['Project', 'ID', 'Title', 'Share', 'Turns', 'Peak', 'Hours'],
@@ -582,12 +589,16 @@ const App = () => {
   const burns = report.burns ?? (report.burn ? {claude: report.burn} : {});
   const sources = Object.keys(burns);
   const current = sources.includes(source) ? source : sources[0];
-  const tabId = TABS.some(([id]) => id === tab) ? tab : 'dashboard';
+  const hours = report.checkHours ?? 24;
+  const wanted = TAB_ALIAS[tab] ?? tab;
+  const tabId = TABS.some(([id]) => id === wanted) ? wanted : 'dashboard';
   const bodies = {
     dashboard: html`<${Dashboard} r=${report} burn=${burns[current]} sources=${sources} source=${current} onSource=${setSource} />`,
-    leaks: html`<${Leaks} issues=${report.issues ?? []} topCount=${(report.topSessions ?? []).length} />`,
-    baseline: html`<${Baseline} rows=${report.baseline ?? []} />`,
-    details: html`<${Details} r=${report} />`,
+    checkup: html`<div class="space-y-3">
+      <${Checks} rows=${report.baseline ?? []} hours=${hours} days=${report.days ?? 7} />
+      <${Leaks} issues=${report.issues ?? []} hours=${hours} />
+    </div>`,
+    sessions: html`<${Sessions} r=${report} />`,
   };
   const linkClass = link === 'offline' ? 'bg-hot/10 text-hot' : link === 'live' ? 'bg-ok/10 text-ok' : 'bg-chip text-muted';
 

@@ -290,6 +290,8 @@ def active_sources(requested):
 
 # Windows for the weekly-limit gain: percentage points spent in the last N hours.
 GAIN_HOURS = (1, 6, 24)
+# Window for the checks and the leaks: what the user fixed recently must show up.
+CHECK_HOURS = 24
 
 # Thresholds for the per-session leak flags. Each one maps to a measured failure.
 BENCH_WINDOW = 200_000        # the benchmark: same turns with context capped here
@@ -308,8 +310,7 @@ def session_flags(turns, peak, hours, reads, wakes):
         flags.append("late compaction: peak %dk. Set autoCompactWindow to about 200000."
                      % (peak / 1000))
     if reads >= CALLER_READS:
-        flags.append("caller reads: %d file/log reads in this session. Send them to a "
-                     "cheap read-only agent." % reads)
+        flags.append("caller reads: %d file/log reads. Send them to a cheap read-only agent." % reads)
     pings = wakes["teammate"] + wakes["task"] + wakes["peer"]
     if pings >= WAKEUPS:
         flags.append("wakeups: %d (teammate %d, task %d, peer %d). Ask for one report at "
@@ -413,6 +414,11 @@ def build_report(args):
     recent = collections.defaultdict(collections.Counter)  # source -> {hours: spend}
     weeks = {"claude": plan_week(), "codex": codex_week()}
     week_now = collections.defaultdict(float)
+    recent_cut = now - datetime.timedelta(hours=CHECK_HOURS)
+    last24 = {"total": 0.0, "over": 0.0, "turns": 0, "contexts": [], "tool_calls": 0,
+              "reads": 0, "wakes": collections.Counter(), "preambles": []}
+    sessions24 = {}  # key -> (cost, turns, peak, full age in hours) for the last CHECK_HOURS
+    signals24 = {}
 
     for source in live:
         _, files, read = SOURCES[source]
@@ -428,6 +434,8 @@ def build_report(args):
             model = None
             first_context = 0
             first_seen = last_seen = None
+            c_cost = c_count = c_peak = c_reads = 0
+            c_wakes = collections.Counter()
             project = session = None
 
             for item in cached(read, path):
@@ -485,6 +493,19 @@ def build_report(args):
                 reads += item["reads"]
                 wakes.update(item["wakes"])
                 totals.update(item["wakes"])
+                if item["when"] >= recent_cut:
+                    c_cost += weighted
+                    c_count += 1
+                    c_peak = max(c_peak, context)
+                    c_reads += item["reads"]
+                    c_wakes.update(item["wakes"])
+                    last24["total"] += weighted
+                    last24["over"] += weighted if context >= 300_000 else 0.0
+                    last24["turns"] += 1
+                    last24["contexts"].append(context)
+                    last24["tool_calls"] += len(item["tools"])
+                    last24["reads"] += item["reads"]
+                    last24["wakes"].update(item["wakes"])
 
                 if count == 1:
                     first_context = context
@@ -501,6 +522,11 @@ def build_report(args):
                          if first_seen and last_seen else 0.0)
                 sessions[(source, project, session)] = (cost, count, peak, hours)
                 signals[(source, project, session)] = (reads, wakes)
+                if c_count:
+                    sessions24[(source, project, session)] = (c_cost, c_count, c_peak, hours)
+                    signals24[(source, project, session)] = (c_reads, c_wakes)
+                    if first_seen >= recent_cut:
+                        last24["preambles"].append(first_context)
                 paths[(source, project, session)] = path
                 if source == "claude":
                     titles[(source, project, session)] = cached(claude_title, path)
@@ -521,6 +547,10 @@ def build_report(args):
         if by_size[label]:
             buckets.append((label, low, share(by_size[label]), turns_by_size[label]))
     preambles.sort()
+    last24["sessions"] = len(sessions24)
+    share24 = lambda value: 100 * value / last24["total"] if last24["total"] else 0.0
+    flags24 = lambda key: (session_flags(*sessions24[key][1:], *signals24[key])
+                           if key in sessions24 else [])
     report = {
         "days": args.days, "total": total, "turns": sum(v[1] for v in sessions.values()),
         "session_count": len(sessions),
@@ -534,9 +564,15 @@ def build_report(args):
         "sessions": [{
             "source": key[0], "project": key[1] or "?", "id": (key[2] or "?")[:8],
             "title": titles.get(key), "path": paths.get(key), "share": share(cost), "turns": count,
-            "peak": peak, "hours": hours, "flags": session_flags(count, peak, hours,
-                                                                 *signals[key]),
+            "peak": peak, "hours": hours, "flags": flags24(key),
         } for key, (cost, count, peak, hours) in top],
+        "recent_sessions": [{
+            "source": key[0], "project": key[1] or "?", "id": (key[2] or "?")[:8],
+            "title": titles.get(key), "path": paths.get(key), "share": share24(cost),
+            "turns": count, "peak": peak, "hours": hours, "flags": flags24(key),
+        } for key, (cost, count, peak, hours) in
+            sorted(sessions24.items(), key=lambda item: -item[1][0])[:10]],
+        "recent": last24,
         "tools": tools.most_common(6),
         "config": config_checks(live),
         "unpriced": (share(unpriced_cost), unpriced.most_common(5)) if unpriced else None,
@@ -545,7 +581,7 @@ def build_report(args):
         "source": key[0], "project": key[1] or "?", "id": (key[2] or "?")[:8],
         "title": titles.get(key), "share": share(sessions[key][0]), "turns": sessions[key][1],
         "peak": sessions[key][2], "hours": sessions[key][3], "context": context, "idle": idle,
-        "flags": session_flags(*sessions[key][1:], *signals[key]),
+        "flags": flags24(key),
         "model": model, "rate": rate,
         "rateShare": 100 * rate / last_hour[key[0]] if last_hour[key[0]] else 0.0,
     } for key, context, idle, model, rate in sorted(active, key=lambda a: -a[4])]
@@ -755,10 +791,10 @@ def print_doctor(r, html_path):
             s["turns"], s["hours"], s["idle"],
             "; " + ", ".join(f.split(":")[0] for f in s["flags"]) if s["flags"] else ""))
     if not issues:
-        print("Verdict: healthy. No common token leaks found.")
+        print("Verdict: healthy. No common token leaks in the last %d h." % CHECK_HOURS)
     else:
-        print("Verdict: %d leak%s found, largest first.\n" % (len(issues),
-                                                           "" if len(issues) == 1 else "s"))
+        print("Verdict: %d leak%s found in the last %d h, largest first.\n" % (
+            len(issues), "" if len(issues) == 1 else "s", CHECK_HOURS))
     for n, issue in enumerate(issues, 1):
         where = ("%.0f%% of spend, %d sessions" % (issue["share"], len(issue["hits"]))
                  if issue["share"] is not None else "config")
@@ -771,10 +807,10 @@ def print_doctor(r, html_path):
           "(%.0f%% less). Estimate: trims cached context only." % (
               BENCH_WINDOW / 1000, r["bench_total"] / 1e6,
               100 * (1 - r["bench_total"] / r["total"])))
-    gaps = [row for row in r["baseline"] if not row[3]]
+    gaps = [row for row in r["baseline"] if not row[4]]
     if gaps:
-        print("\nBaseline gaps (now -> recommended):")
-        for name, now, target, _ in gaps:
+        print("\nBaseline gaps (last %d h -> recommended):" % CHECK_HOURS)
+        for name, now, _, target, _ in gaps:
             print("  %-28s %-18s %s" % (name, now, target))
     if html_path:
         print("\nReport: %s" % os.path.abspath(html_path))
@@ -783,31 +819,46 @@ def print_doctor(r, html_path):
 
 
 def baseline(r, contexts, totals):
-    """Current value against a recommended target for each lever. (name, now, target, ok)."""
+    """Each lever over the last CHECK_HOURS and over the whole window, against a recommended
+    target. (name, now_24h, value_7d, target, ok); ok judges the 24 h value, None means no data."""
     window, _ = compact_window(os.path.join(
         os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "settings.json"))
-    median = contexts[len(contexts) // 2] if contexts else 0
-    pings = totals["teammate"] + totals["task"] + totals["peer"]
-    sessions = max(r["session_count"], 1)
-    rows = [
-        ("Spend on turns over 300k", "%.0f%%" % r["over_300k"], "under 10%",
-         r["over_300k"] < 10),
-        ("Median context per turn", "%dk" % (median / 1000), "under 150k", median < 150_000),
-        ("autoCompactWindow", "%dk" % (window / 1000) if window else "unset (model max)",
-         "about 200k", bool(window) and window <= COMPACT_WINDOW_MAX),
-        ("Turns per human prompt", "%.0f" % (r["turns"] / max(totals["human"], 1)),
-         "under 50", r["turns"] / max(totals["human"], 1) < 50),
-        ("Caller reads per tool call", "%.0f%%" % (100 * totals["reads"]
-                                                   / max(totals["tool_calls"], 1)),
-         "under 20%", totals["reads"] / max(totals["tool_calls"], 1) < 0.2),
-        ("Wakeups per session", "%.0f" % (pings / sessions), "under 20", pings / sessions < 20),
-        ("Longest top session", "%.0fh" % max((s["hours"] for s in r["sessions"]), default=0),
-         "under %dh" % LONG_LIVED_HOURS,
-         all(s["hours"] < LONG_LIVED_HOURS for s in r["sessions"])),
+    median = lambda xs: sorted(xs)[len(xs) // 2] if xs else None
+    recent = r["recent"]
+    wakes = recent["wakes"]
+    ping = lambda w: w["teammate"] + w["task"] + w["peer"]
+    sessions24 = r["recent_sessions"]
+    week_preambles = r["preamble"] and r["preamble"][0]
+    have = recent["turns"] > 0
+    pct = lambda v: "%.0f%%" % v
+    kilo = lambda v: "%dk" % (v / 1000)
+    count = lambda v: "%.0f" % v
+    hours = lambda v: "%.0fh" % v
+    # (name, format, 24 h value, whole-window value, target text, good(value))
+    levers = [
+        ("Spend on turns over 300k", pct, 100 * recent["over"] / recent["total"] if have else None,
+         r["over_300k"], "under 10%", lambda v: v < 10),
+        ("Median context per turn", kilo, median(recent["contexts"]), median(contexts) or 0,
+         "under 150k", lambda v: v < 150_000),
+        ("Turns per human prompt", count, recent["turns"] / max(wakes["human"], 1) if have else None,
+         r["turns"] / max(totals["human"], 1), "under 50", lambda v: v < 50),
+        ("Caller reads per tool call", pct,
+         100 * recent["reads"] / max(recent["tool_calls"], 1) if have else None,
+         100 * totals["reads"] / max(totals["tool_calls"], 1), "under 20%", lambda v: v < 20),
+        ("Wakeups per session", count,
+         ping(wakes) / recent["sessions"] if recent["sessions"] else None,
+         ping(totals) / max(r["session_count"], 1), "under 20", lambda v: v < 20),
+        ("Longest top session", hours, max((s["hours"] for s in sessions24), default=None),
+         max((s["hours"] for s in r["sessions"]), default=0), "under %dh" % LONG_LIVED_HOURS,
+         lambda v: v < LONG_LIVED_HOURS),
     ]
-    if r["preamble"]:
-        rows.append(("Preamble per session (p50)", "%dk" % (r["preamble"][0] / 1000),
-                     "under 40k", r["preamble"][0] < 40_000))
+    if week_preambles:
+        levers.append(("Preamble per session (p50)", kilo, median(recent["preambles"]),
+                       week_preambles, "under 40k", lambda v: v < 40_000))
+    rows = [(name, "-" if now is None else fmt(now), fmt(week), target,
+             now is None or good(now)) for name, fmt, now, week, target, good in levers]
+    rows.insert(2, ("autoCompactWindow", "%dk" % (window / 1000) if window else "unset (model max)",
+                    None, "about 200k", bool(window) and window <= COMPACT_WINDOW_MAX))
     return rows
 
 
@@ -844,8 +895,8 @@ def print_text(r):
     for name, value in r["tools"]:
         print("  %-28s %d" % (name, value))
 
-    print("\nLEAK CHECKS (top sessions; each flag names its fix)")
-    flagged = [s for s in r["sessions"] if s["flags"]]
+    print("\nLEAK CHECKS (top sessions of the last %d h; each flag names its fix)" % CHECK_HOURS)
+    flagged = [s for s in r["recent_sessions"] if s["flags"]]
     for s in flagged:
         print("  %5.1f%%  %s %s  %s" % (s["share"], s["source"], s["id"], s["title"] or ""))
         for flag in s["flags"]:
@@ -857,9 +908,9 @@ def print_text(r):
     for line in r["config"]:
         print("  - " + line)
 
-    print("\nBASELINE (now -> recommended)")
-    for name, now, target, ok in r["baseline"]:
-        print("  %-4s %-28s %-18s %s" % ("ok" if ok else "FIX", name, now, target))
+    print("\nBASELINE (last %d h, %d-day value, recommended)" % (CHECK_HOURS, r["days"]))
+    for name, now, week, target, ok in r["baseline"]:
+        print("  %-4s %-28s %-18s %-8s %s" % ("ok" if ok else "FIX", name, now, week or "", target))
 
     if r["unpriced"]:
         print("\nUNPRICED MODELS (counted at 1.0x -- %.0f%% of reported spend)" % r["unpriced"][0])
@@ -916,7 +967,7 @@ ISSUES = {
 def top_issues(r):
     """Group session flags and failed config checks into issues, largest spend share first."""
     groups = {}
-    for s in r["sessions"]:
+    for s in r["recent_sessions"]:
         for flag in s["flags"]:
             groups.setdefault(flag.split(":")[0], []).append((s, flag))
     issues = []
@@ -958,8 +1009,8 @@ def issue_prompt(issue, r):
     lines = ["Token leak to fix: %s." % issue["title"]]
     if issue["share"] is not None:
         lines.append("It affects %d of my top sessions, %.0f%% of Claude Code spend in the last "
-                     "%d days (burn.py, base-input-equivalent tokens)."
-                     % (len(issue["hits"]), issue["share"], r["days"]))
+                     "%d h (burn.py, base-input-equivalent tokens)."
+                     % (len(issue["hits"]), issue["share"], CHECK_HOURS))
     lines += ["", "Why it costs tokens: " + issue["why"]]
     if issue["hits"]:
         lines += ["", "Evidence:"]
@@ -1035,8 +1086,9 @@ def report_view(r):
         "burndown": burndown, "benchWindow": BENCH_WINDOW,
         "budget": r["budget"], "kpis": kpis,
         "timeline": [[iso(t), cool, hot] for t, (cool, hot) in r["timeline"]],
-        "baseline": [{"name": n, "now": v, "target": t, "ok": ok}
-                     for n, v, t, ok in r["baseline"]],
+        "checkHours": CHECK_HOURS,
+        "baseline": [{"name": n, "now_24h": v, "value_7d": w, "target": t, "ok": ok}
+                     for n, v, w, t, ok in r["baseline"]],
         "topSessions": r["sessions"],
         "buckets": [{"label": l, "hot": low >= 300, "share": pct, "turns": n}
                     for l, low, pct, n in r["buckets"]],
