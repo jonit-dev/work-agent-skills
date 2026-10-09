@@ -391,9 +391,9 @@ def build_report(args):
     paths = {}
     active = []
     now = datetime.datetime.now(datetime.timezone.utc)
-    last_hour = 0.0
-    week = plan_week()
-    week_now = 0.0
+    last_hour = collections.defaultdict(float)
+    weeks = {"claude": plan_week(), "codex": codex_week()}
+    week_now = collections.defaultdict(float)
 
     for source in live:
         _, files, read = SOURCES[source]
@@ -431,9 +431,10 @@ def build_report(args):
                 cost += weighted
                 total += weighted
                 if item["when"] >= now - datetime.timedelta(hours=1):
-                    last_hour += weighted
-                if week and source == "claude" and item["when"] >= week["start"]:
-                    week_now += weighted
+                    last_hour[source] += weighted
+                week = weeks.get(source)
+                if week and item["when"] >= week["start"]:
+                    week_now[source] += weighted
                 all_context += context
                 peak = max(peak, context)
                 by_project[project] += weighted
@@ -525,14 +526,17 @@ def build_report(args):
     report["bench_total"] = sum(v["bench"] for v in hourly.values())
     report["budget"] = args.weekly_budget * 1e6 if args.weekly_budget else None
     report["baseline"] = baseline(report, contexts, totals)
-    report["last_hour"] = last_hour
-    report["week"] = None
-    if week and week["used"] >= 1 and week_now:
-        # Calibrate: this week's local spend is `used` percent of the plan's week.
-        limit = week_now * 100 / week["used"]
-        hours_left = max((week["resets"] - now).total_seconds() / 3600, 1)
-        report["week"] = {"resets": week["resets"], "hours_left": hours_left,
-                          "ideal": max(limit - week_now, 0) / hours_left}
+    report["burns"] = {}
+    for source in live:
+        week, spent = weeks.get(source), week_now[source]
+        burn = {"rate": last_hour[source], "total": by_source[source], "week": None}
+        if week and week["used"] >= 1 and spent:
+            # Calibrate: this week's local spend is `used` percent of the plan's week.
+            limit = spent * 100 / week["used"]
+            hours_left = max((week["resets"] - now).total_seconds() / 3600, 1)
+            burn["week"] = {"resets": week["resets"], "hours_left": hours_left,
+                            "ideal": max(limit - spent, 0) / hours_left}
+        report["burns"][source] = burn
     return report
 
 
@@ -568,17 +572,42 @@ def plan_week():
     return week
 
 
-def burn_goal(r):
-    """The hourly burn goal: the plan's remaining week over the hours to its reset, else a
-    weekly budget over 168 h, else the window's own average."""
-    if r.get("week"):
-        w = r["week"]
+def burn_goal(r, source):
+    """The hourly burn goal for one source: the plan's remaining week over the hours to its
+    reset, else (Claude only) a weekly budget over 168 h, else the window's own average."""
+    burn = r["burns"][source]
+    if burn["week"]:
+        w = burn["week"]
         return w["ideal"], "ideal pace to the weekly reset %s (%.0f h left)" % (
             w["resets"].astimezone().strftime("%a %H:%M"), w["hours_left"])
-    if r["budget"]:
+    if r["budget"] and source == "claude":
         return r["budget"] / 168, "weekly budget %.0fM / 168 h" % (r["budget"] / 1e6)
-    return r["total"] / (r["days"] * 24), (
+    return burn["total"] / (r["days"] * 24), (
         "your %d-day average; the subscription usage was unavailable" % r["days"])
+
+
+def codex_week():
+    """Codex's 7-day window from the rate_limits it logs in each session; None when unknown."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for path in sorted(codex_files(), key=os.path.getmtime, reverse=True)[:5]:
+        with open(path, "rb") as fh:
+            fh.seek(max(os.path.getsize(path) - 262144, 0))
+            lines = fh.read().decode(errors="replace").splitlines()
+        for line in reversed(lines):
+            if '"rate_limits"' not in line:
+                continue
+            try:
+                limits = json.loads(line)["payload"]["rate_limits"]
+                week = [w for w in (limits.get("primary"), limits.get("secondary"))
+                        if w and w.get("window_minutes") == 10080][0]
+                resets = datetime.datetime.fromtimestamp(week["resets_at"], datetime.timezone.utc)
+            except (ValueError, KeyError, TypeError, IndexError, AttributeError):
+                continue
+            if resets <= now:
+                return None  # the newest reading is from a finished week
+            return {"start": resets - datetime.timedelta(days=7), "resets": resets,
+                    "used": float(week["used_percent"])}
+    return None
 
 
 def serve(args):
@@ -657,9 +686,10 @@ def print_doctor(r, html_path):
     issues = top_issues(r)
     print("TOKEN DOCTOR: last %d days, %.0fM weighted tokens, %d sessions" % (
         r["days"], r["total"] / 1e6, r["session_count"]))
-    goal, basis = burn_goal(r)
-    print("Burn: %.1fM in the last hour, goal %.1fM/h (%s)" % (
-        r["last_hour"] / 1e6, goal / 1e6, basis))
+    for source, burn in r["burns"].items():
+        goal, basis = burn_goal(r, source)
+        print("Burn (%s): %.1fM in the last hour, goal %.1fM/h (%s)" % (
+            source, burn["rate"] / 1e6, goal / 1e6, basis))
     for s in r["active"]:
         print("Active: %s (%s %s) context %dk, %d turns, %.0fh old, idle %.0fm%s" % (
             (s["title"] or "(untitled)")[:40], s["source"], s["id"], s["context"] / 1000,
@@ -889,7 +919,6 @@ def report_view(r):
     """Everything dashboard.html draws, as JSON-ready data. The page owns all markup."""
     iso = lambda t: t.isoformat()
     issues = top_issues(r)
-    goal, basis = burn_goal(r)
     actual = dict(r["timeline"])
     run_a = run_b = 0.0
     burndown = []
@@ -924,14 +953,19 @@ def report_view(r):
         elif s["hours"] >= LONG_LIVED_HOURS:
             actions.append("Finish “%s” and start a fresh session: it is %.0fh old." % (
                 name, s["hours"]))
-    week = r.get("week")
+    burns = {}
+    for source, burn in r["burns"].items():
+        goal, basis = burn_goal(r, source)
+        week = burn["week"]
+        burns[source] = {"rate": burn["rate"], "goal": goal, "basis": basis,
+                         "resets": iso(week["resets"]) if week else None,
+                         "hoursLeft": week["hours_left"] if week else None}
     return {
         "generated": iso(datetime.datetime.now(datetime.timezone.utc)), "days": r["days"],
         "total": r["total"], "sessions": r["session_count"], "turns": r["turns"],
         "over300k": r["over_300k"],
-        "burn": {"rate": r["last_hour"], "goal": goal, "basis": basis,
-                 "resets": iso(week["resets"]) if week else None,
-                 "hoursLeft": week["hours_left"] if week else None},
+        "burns": burns,
+        "burn": burns.get("claude") or next(iter(burns.values()), None),
         "actions": actions,
         "issues": [{"title": i["title"], "fix": i["fix"], "priority": i["priority"],
                     "share": i["share"], "sessions": len(i["hits"]),

@@ -60,13 +60,28 @@ def main():
             assert expected in out, "missing %r in:\n%s" % (expected, out)
         with open(os.path.join(root, "report.html")) as fh:
             page = fh.read()
-        assert "<title>Claude Token Doctor</title>" in page and "caller reads: 300" in page
-        assert "Leaks to fix" in page and "Copy all fixes for Claude" in page
-        assert "transcript: " in page and "Sessions compact too late" in page
-        assert "Burndown vs benchmark" in page and "Caller reads per tool call" in page
-        assert "Burn rate, last hour" in page and "your 2-day average" in page
-        assert "Active now" in page and "No session had a turn" in page
-        assert "Baseline: now vs recommended" in page and "<svg class=\"chart\"" in page
+        assert "<title>Claude Token Doctor</title>" in page
+        prefix = "window.__REPORT__ = "
+        suffix = "</script>"
+        start = page.index(prefix) + len(prefix)
+        end = page.index(suffix, start)
+        json_part = page[start:end]
+        assert "</script" not in json_part
+        report_data = json.loads(json_part.replace("<\\/", "</"))
+        assert report_data["issues"]
+        assert "caller reads: 300" in json.dumps(report_data)
+        assert any("compact too late" in issue["title"] for issue in report_data["issues"])
+        assert all(1 <= issue["priority"] <= 3 for issue in report_data["issues"])
+        assert [issue["priority"] for issue in report_data["issues"]] == sorted(
+            issue["priority"] for issue in report_data["issues"]
+        )
+        assert any("transcript: " in issue.get("prompt", "") for issue in report_data["issues"])
+        assert "2-day average" in report_data["burn"]["basis"]
+        assert isinstance(report_data["active"], list)
+        assert report_data["burndown"]
+        assert report_data["kpis"]
+        assert report_data["timeline"]
+        assert report_data["baseline"]
 
         doctor = subprocess.run([os.path.join(HERE, "doctor"), "2", "--source", "claude"],
                                 env=dict(os.environ, CLAUDE_CONFIG_DIR=root,
@@ -83,5 +98,25 @@ def main():
     print("test_burn: ok")
 
 
+def check_codex_week():
+    """Codex's weekly window comes from the rate_limits it logs; a finished week is ignored."""
+    sys.path.insert(0, HERE)
+    import burn
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    with tempfile.TemporaryDirectory() as home:
+        path = os.path.join(home, "sessions", "2026", "rollout-x.jsonl")
+        os.makedirs(os.path.dirname(path))
+        os.environ["CODEX_HOME"] = home
+        for resets, expected in ((now + 3600, 40.0), (now - 3600, None)):
+            limits = {"primary": {"used_percent": 9, "window_minutes": 300, "resets_at": now},
+                      "secondary": {"used_percent": 40, "window_minutes": 10080, "resets_at": resets}}
+            with open(path, "w") as fh:
+                fh.write(json.dumps({"type": "event_msg", "payload": {"rate_limits": limits}}) + "\n")
+            week = burn.codex_week()
+            assert (week and week["used"]) == expected, week
+        del os.environ["CODEX_HOME"]
+
+
 if __name__ == "__main__":
     main()
+    check_codex_week()

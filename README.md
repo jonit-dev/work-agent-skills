@@ -58,7 +58,7 @@ and symlink from each agent's directory into it.
 | `system-documenter` | Architecture cartography and living system documentation |
 | `spike` | Time-boxed experiments before committing to a build |
 | `skill-creator` / `skill-optimizer` | Author and tighten skills themselves |
-| `claude-token-doctor` | Cut token cost by preventing wasted work; sets up Serena and token-efficient defaults for Claude Code and Codex |
+| `claude-token-doctor` | Token burn doctor: live dashboard on 127.0.0.1:8765 with a burn-rate gauge against the weekly-limit pace, prioritized leaks and fixes |
 | `wikiskill-evolution` | Turn recurring lessons into durable project knowledge |
 
 ### Review, testing, and debugging
