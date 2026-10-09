@@ -25,14 +25,39 @@ def user(when, text):
     return record("user", when, message={"content": text})
 
 
-def run(config_dir, env_extra=None):
+def run(config_dir, env_extra=None, days="2"):
     env = dict(os.environ, CLAUDE_CONFIG_DIR=config_dir, XDG_CACHE_HOME=config_dir)
     env.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
     env.update(env_extra or {})
-    return subprocess.run([sys.executable, os.path.join(HERE, "burn.py"), "2",
+    return subprocess.run([sys.executable, os.path.join(HERE, "burn.py"), days,
                            "--source", "claude", "--html",
                            os.path.join(config_dir, "report.html")], env=env, capture_output=True,
                           text=True, check=True).stdout
+
+
+def check_last_24h():
+    """An old peak-900k session must not flag or fail the checks once a recent one is healthy."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    with tempfile.TemporaryDirectory() as root:
+        project = os.path.join(root, "projects", "demo")
+        os.makedirs(project)
+        for name, age, context in (("old", datetime.timedelta(days=3), 900_000),
+                                   ("new", datetime.timedelta(hours=2), 100_000)):
+            lines = [user(now - age, "go")] + [
+                assistant(now - age + datetime.timedelta(seconds=i * 60), context)
+                for i in range(20)]
+            with open(os.path.join(project, name + "-session.jsonl"), "w") as fh:
+                fh.write("\n".join(lines) + "\n")
+        out = run(root, days="7")
+        assert "ok   Spend on turns over 300k" in out, out
+        assert "late compaction" not in out, out
+        with open(os.path.join(root, "report.html")) as fh:
+            page = fh.read()
+        data = json.loads(page[page.index("window.__REPORT__ = ") + 20:page.index("</script>",
+                                                                              page.index("window.__REPORT__"))])
+        row = next(b for b in data["baseline"] if b["name"].startswith("Spend on turns"))
+        assert row["ok"] and row["now_24h"] == "0%" and row["value_7d"] != "0%", row
+        assert not any("compact too late" in i["title"] for i in data["issues"])
 
 
 def main():
@@ -119,4 +144,5 @@ def check_codex_week():
 
 if __name__ == "__main__":
     main()
+    check_last_24h()
     check_codex_week()
