@@ -1,9 +1,9 @@
 ---
-name: token-savings-inspection
+name: claude-token-doctor
 description: Token doctor - run `scripts/doctor` to detect common token leaks in local Claude Code and Codex transcripts (late compaction, caller-side reads, wakeups, unbounded loops, long-lived sessions, bad config) and get ranked fixes plus an HTML report with copy-to-Claude prompts. Also cuts coding-agent token cost by preventing wasted work rather than compressing text — a retrieval policy, a verification ladder, a retry circuit breaker, and a delegation rule, plus the scripts that measure and enforce them. Installs and configures itself for Claude Code and Codex, with config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the token budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
 ---
 
-# token-savings-inspection
+# claude-token-doctor
 
 ## Start here: the doctor
 
@@ -12,9 +12,14 @@ scripts/doctor              # last 7 days, every agent found
 scripts/doctor 2 --source claude
 ```
 
+It also starts the live report on `http://127.0.0.1:8765` when nothing serves that port
+(`TOKEN_DOCTOR_PORT` moves it). Give the user that link; do not open the HTML file. The page
+rebuilds on each load and reloads every minute: active sessions, the last hour's burn rate
+against the ideal pace to the plan's weekly reset, and the leaks.
+
 It prints a verdict, each leak ranked by share of spend with its fix and the worst sessions,
 and the baseline levers that miss their target. It exits 1 when it finds a leak. It also
-writes `~/.cache/token-savings-inspection/report.html`: a spend-over-time chart, the
+writes `~/.cache/claude-token-doctor/report.html`: a spend-over-time chart, the
 baseline table, the leak table, and a "Copy for Claude" button per leak that copies a
 prompt with the evidence and transcript paths. The detail behind each check is in
 "Measure before you tune" below.
@@ -160,13 +165,13 @@ alone and exits non-zero on failure, so it can gate a provisioning script.
 
 **It backs up before it touches anything.** Every `--apply` run first copies
 `settings.json`, `config.toml`, `CLAUDE.md` and `AGENTS.md` into
-`~/.agents/token-savings-inspection-backups/<timestamp>/` and writes a `restore.sh` beside them. Nothing
+`~/.agents/claude-token-doctor-backups/<timestamp>/` and writes a `restore.sh` beside them. Nothing
 is edited until that backup exists. `--rollback` restores the newest one; any older
 snapshot restores by running its own `restore.sh`.
 
 What it does:
 
-1. **Skills** — links `token-savings-inspection`, `prd-creator` and `prd-manager` into
+1. **Skills** — links `claude-token-doctor`, `prd-creator` and `prd-manager` into
    `~/.claude/skills/` and `~/.codex/skills/` from one shared checkout, so both agents read
    the same file and an update lands in both.
 2. **The always-on line** — appends one line to `~/.claude/CLAUDE.md` and
@@ -178,7 +183,7 @@ What it does:
    > the smallest range that answers the question and **never re-establish a fact you
    > already have** — no confirming grep after a read that answered it; run the smallest
    > test that can falsify the current hypothesis; after two failures with the same cause,
-   > stop editing and re-plan. Full policy: `~/.agents/skills/token-savings-inspection/SKILL.md`.
+   > stop editing and re-plan. Full policy: `~/.agents/skills/claude-token-doctor/SKILL.md`.
 
    It names `prd-creator` and carries its rules inline on purpose. A skill that is merely *installed*
    self-activated **zero times in ten sessions** in JetBrains' evaluation of Ponytail —

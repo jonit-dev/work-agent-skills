@@ -1,5 +1,0 @@
-#!/bin/sh
-# Token doctor: detect common token leaks in local agent transcripts and recommend fixes.
-# Usage: doctor [days] [--source claude|codex]   (default: last 7 days, every agent found)
-exec python3 "$(dirname "$0")/burn.py" --doctor \
-  --html "${XDG_CACHE_HOME:-$HOME/.cache}/token-savings-inspection/report.html" "$@"
