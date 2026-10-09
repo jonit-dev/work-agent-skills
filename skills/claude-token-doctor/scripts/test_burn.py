@@ -61,8 +61,6 @@ def check_last_24h():
         row = next(b for b in data["baseline"] if b["name"].startswith("Spend on turns"))
         assert row["ok"] and row["now_24h"] == "0%" and row["value_7d"] != "0%", row
         by = {b["name"]: b for b in data["baseline"]}
-        assert by["Big tool results"]["now_24h"] == "5.0%", by["Big tool results"]
-        assert by["Big tool results"]["level"] == "critical"  # 5% against under 2%: ratio 2.5
         assert by["Cache rebuilds"]["level"] == "warn", by["Cache rebuilds"]  # ~14% against 10%
         top = by["Spend on the top model"]  # advisory: opus only, so never worse than info
         assert top["advisory"] and top["level"] == "info" and not top["ok"], top
@@ -105,6 +103,9 @@ def check_weekly_quota():
         assert points[0][1] == 0 and all(a[1] <= b[1] and a[0] <= b[0] for a, b in zip(points, points[1:]))
         assert points[-1][2] <= points[-1][1]
         assert burn["projection"]["ratePct"] > 0
+        # One run-out for tile and chart: points left at the 24 h pace.
+        proj = burn["projection"]
+        assert abs(proj["hoursToEmpty"] * proj["ratePct"] - (100 - burn["used"])) < 1e-6, proj
 
 
 def main():

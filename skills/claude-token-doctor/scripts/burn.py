@@ -292,7 +292,6 @@ def active_sources(requested):
 GAIN_HOURS = (1, 6, 24)
 # Window for the checks and the leaks: what the user fixed recently must show up.
 CHECK_HOURS = 24
-BIG_RESULT = 50_000           # a turn whose context grew by more than this pasted a big tool result
 LEVELS = {1: "critical", 2: "warn", 3: "info"}  # leak priority -> the word the page shows
 
 # Thresholds for the per-session leak flags. Each one maps to a measured failure.
@@ -419,8 +418,8 @@ def build_report(args):
     recent_cut = now - datetime.timedelta(hours=CHECK_HOURS)
     last24 = {"total": 0.0, "over": 0.0, "turns": 0, "contexts": [], "tool_calls": 0,
               "reads": 0, "wakes": collections.Counter(), "preambles": [],
-              "cache_write": 0, "cache_input": 0, "big": 0, "top": 0.0}
-    stats7 = {"cache_write": 0, "cache_input": 0, "big": 0, "turns": 0, "top": 0.0}
+              "cache_write": 0, "cache_input": 0, "top": 0.0}
+    stats7 = {"cache_write": 0, "cache_input": 0, "turns": 0, "top": 0.0}
     top_rate = max(MODEL_RATE.values())
     week_hourly = collections.defaultdict(lambda: collections.defaultdict(lambda: [0.0, 0.0]))
     sessions24 = {}  # key -> (cost, turns, peak, full age in hours) for the last CHECK_HOURS
@@ -442,7 +441,6 @@ def build_report(args):
             first_seen = last_seen = None
             c_cost = c_count = c_peak = c_reads = 0
             c_wakes = collections.Counter()
-            prev_context = 0
             project = session = None
 
             for item in cached(read, path):
@@ -478,10 +476,7 @@ def build_report(args):
                     week_now[source] += weighted
                 all_context += context
                 is_top = rate is not None and rate >= top_rate
-                is_big = bool(prev_context) and context - prev_context > BIG_RESULT
-                prev_context = context
                 stats7["turns"] += 1
-                stats7["big"] += is_big
                 stats7["top"] += weighted if is_top else 0.0
                 if source == "claude":  # Codex logs no cache writes, so it would read as 0%
                     stats7["cache_write"] += item["cache_write"]
@@ -526,7 +521,6 @@ def build_report(args):
                     last24["tool_calls"] += len(item["tools"])
                     last24["reads"] += item["reads"]
                     last24["wakes"].update(item["wakes"])
-                    last24["big"] += is_big
                     last24["top"] += weighted if is_top else 0.0
                     if source == "claude":
                         last24["cache_write"] += item["cache_write"]
@@ -626,16 +620,20 @@ def build_report(args):
             limit = spent * 100 / week["used"]
             hours_left = max((week["resets"] - now).total_seconds() / 3600, 1)
             gains = {h: recent[source][h] * 100 / limit for h in GAIN_HOURS}
-            rate24 = gains[CHECK_HOURS] / CHECK_HOURS  # quota points per hour over the last 24 h
+            # Quota points per hour over the last 24 h. A week younger than that has spent only its own
+            # points, so divide by the time since the week began.
+            age = max((now - week["start"]).total_seconds() / 3600, 1)
+            rate24 = week["used"] / age if age < CHECK_HOURS else gains[CHECK_HOURS] / CHECK_HOURS
             left = 100 - week["used"]
-            dry = now + datetime.timedelta(hours=left / rate24) if rate24 > 0 else None
+            to_empty = left / rate24 if rate24 > 0 else None
+            dry = now + datetime.timedelta(hours=to_empty) if to_empty else None
             burn["week"] = {"resets": week["resets"], "hours_left": hours_left, "used": week["used"],
                             "ideal": max(limit - spent, 0) / hours_left,
                             "limit": limit, "start": week["start"],
                             "rate_pct": burn["rate"] * 100 / limit,
                             "ideal_pct": max(left, 0) / hours_left,
                             "burndown": week_points(week_hourly[source], week["start"], now, limit),
-                            "projection": {"rate_pct": rate24,
+                            "projection": {"rate_pct": rate24, "hours_to_empty": to_empty,
                                            "runs_out": dry if dry and dry < week["resets"] else None},
                             "gains": gains}
         report["burns"][source] = burn
@@ -906,8 +904,6 @@ def baseline(r, contexts, totals):
         ("Longest top session", hours, max((s["hours"] for s in sessions24), default=None),
          max((s["hours"] for s in r["sessions"]), default=0), "under %dh" % LONG_LIVED_HOURS,
          LONG_LIVED_HOURS, False),
-        ("Big tool results", lambda v: "%.1f%%" % v, share(recent["big"], recent["turns"]),
-         share(stats["big"], stats["turns"]) or 0, "under 2%", 2, False),
         ("Spend on the top model", pct, share(recent["top"], recent["total"]),
          share(stats["top"], r["total"]) or 0, "under 60%", 60, True),
     ]
@@ -1154,6 +1150,7 @@ def report_view(r):
                          "weekBurndown": [[iso(t), a, b] for t, a, b in week["burndown"]]
                          if week else None,
                          "projection": {"ratePct": week["projection"]["rate_pct"],
+                                        "hoursToEmpty": week["projection"]["hours_to_empty"],
                                         "runsOut": iso(week["projection"]["runs_out"])
                                         if week["projection"]["runs_out"] else None}
                          if week else None}
