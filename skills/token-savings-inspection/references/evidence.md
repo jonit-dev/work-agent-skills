@@ -1,4 +1,4 @@
-# Evidence behind token-saver
+# Evidence behind token-savings-inspection
 
 Read this when deciding whether to deviate from the policy in `SKILL.md`, or when someone
 proposes a new "token optimizer". Every number below comes from a named, dated source; the
@@ -140,7 +140,7 @@ quality difference at that sample size.
 The activation caveat is the important part. Merely *installed*, the skill self-activated
 **zero times across ten sessions**. The measured effect came from force-injecting the rules.
 Install statistics are meaningless unless you instrument whether the rules reached the
-model — which is why token-saver's one-liner goes in `CLAUDE.md`/`AGENTS.md` rather than
+model — which is why token-savings-inspection's one-liner goes in `CLAUDE.md`/`AGENTS.md` rather than
 relying on skill discovery.
 
 **i-have-adhd** and native Concise style shape human-facing output: roughly 7,873 output
