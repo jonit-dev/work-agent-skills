@@ -669,11 +669,15 @@ def serve(args):
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            report = build_report(args)
-            if self.path.startswith("/api/report"):
+            if self.path == "/dashboard.html":  # the raw page, polled for hot reload: no rebuild
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")) as fh:
+                    body, kind = fh.read(), "text/html"
+            elif self.path.startswith("/api/report"):
+                report = build_report(args)
                 body, kind = json.dumps(report_view(report) if report else None,
                                         default=str), "application/json"
             else:
+                report = build_report(args)
                 body, kind = render_html(report) if report else "No assistant turns.", "text/html"
             self.send_response(200)
             self.send_header("Content-Type", kind + "; charset=utf-8")
