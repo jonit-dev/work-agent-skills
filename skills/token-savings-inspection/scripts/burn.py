@@ -271,6 +271,7 @@ def active_sources(requested):
 
 
 # Thresholds for the per-session leak flags. Each one maps to a measured failure.
+BENCH_WINDOW = 200_000        # the benchmark: same turns with context capped here
 LATE_COMPACT_PEAK = 300_000   # context above this means auto-compact fires too late
 CALLER_READS = 100            # reads the caller ran itself instead of delegating
 WAKEUPS = 50                  # teammate/task/peer messages, each a full-context turn
@@ -349,6 +350,8 @@ def main():
     parser.add_argument("--source", default="all", choices=["all"] + list(SOURCES))
     parser.add_argument("--list-sources", action="store_true")
     parser.add_argument("--html", metavar="PATH", help="also write an HTML report to PATH")
+    parser.add_argument("--weekly-budget", type=float, metavar="M",
+                        help="weekly budget in millions of weighted tokens; draws a burndown line")
     parser.add_argument("--doctor", action="store_true",
                         help="print only the verdict, the leaks and their fixes; exit 1 on leaks")
     args = parser.parse_args()
@@ -382,6 +385,7 @@ def main():
     preambles = []
     signals = {}
     timeline = collections.defaultdict(lambda: [0.0, 0.0])
+    hourly = collections.defaultdict(lambda: {"bench": 0.0, "ctx": [], "reads": 0, "calls": 0})
     contexts = []
     totals = collections.Counter()
     titles = {}
@@ -432,6 +436,14 @@ def main():
                 tools.update(name for name in item["tools"] if name)
                 hour = item["when"].replace(minute=0, second=0, microsecond=0)
                 timeline[hour][context >= 300_000] += weighted
+                # Benchmark: the same turn if auto-compact had kept context at BENCH_WINDOW.
+                trimmed = max(item["cache_read"] - max(context - BENCH_WINDOW, 0), 0)
+                slot = hourly[hour]
+                slot["bench"] += weighted - (rate if rate is not None else 1.0) * (
+                    CACHE_READ_RATE * (item["cache_read"] - trimmed))
+                slot["ctx"].append(context)
+                slot["reads"] += item["reads"]
+                slot["calls"] += len(item["tools"])
                 contexts.append(context)
                 totals["tool_calls"] += len(item["tools"])
                 totals["reads"] += item["reads"]
@@ -491,6 +503,9 @@ def main():
     }
     contexts.sort()
     report["timeline"] = sorted(timeline.items())
+    report["hourly"] = sorted(hourly.items())
+    report["bench_total"] = sum(v["bench"] for v in hourly.values())
+    report["budget"] = args.weekly_budget * 1e6 if args.weekly_budget else None
     report["baseline"] = baseline(report, contexts, totals)
     if args.html:
         os.makedirs(os.path.dirname(os.path.abspath(args.html)), exist_ok=True)
@@ -522,6 +537,10 @@ def print_doctor(r, html_path):
         worst = sorted(issue["hits"], key=lambda h: -h[0]["share"])[:2]
         for s, flag in worst:
             print("   e.g. %s: %s" % ((s["title"] or s["id"])[:40], flag.split(".")[0]))
+    print("\nBenchmark: the same turns at a %dk compaction window would cost about %.0fM "
+          "(%.0f%% less). Estimate: trims cached context only." % (
+              BENCH_WINDOW / 1000, r["bench_total"] / 1e6,
+              100 * (1 - r["bench_total"] / r["total"])))
     gaps = [row for row in r["baseline"] if not row[3]]
     if gaps:
         print("\nBaseline gaps (now -> recommended):")
@@ -687,7 +706,9 @@ def top_issues(r):
         if not (line.endswith("ok.") or line == "none"):
             title = ("autoCompactWindow" if "autoCompactWindow" in line
                      else "memory index too long" if "MEMORY.md" in line else line[:40])
-            issues.append({"title": "Config: " + title, "why": line, "fix": line,
+            fix = ("Shorten MEMORY.md under %d lines; move detail into topic files."
+                   % MEMORY_INDEX_LINES if "MEMORY.md" in line else line)
+            issues.append({"title": "Config: " + title, "why": line, "fix": fix,
                            "action": "Fix this config problem: " + line, "share": None,
                            "hits": []})
     return issues
@@ -731,33 +752,45 @@ HTML_STYLE = """
 :root[data-theme=dark]{--bg:#141413;--card:#1e1e1c;--ink:#ecece8;--muted:#9c9c96;--line:#33332f;
 --bar:#5b8ae6;--hot:#e0665a;--ok:#5cc07f;--chip:#3a2422}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
-font:15px/1.5 system-ui,sans-serif}main{max-width:1040px;margin:0 auto;padding:24px 16px}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 10px}
-.muted{color:var(--muted)}.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-gap:10px;margin-top:16px}.tile,.card{background:var(--card);border:1px solid var(--line);
-border-radius:10px;padding:12px 14px}.tile b{display:block;font-size:22px}
-.row{display:grid;grid-template-columns:90px 1fr 150px;gap:10px;align-items:center;margin:6px 0}
-.track{background:var(--line);border-radius:4px;height:14px;overflow:hidden}
-.fill{background:var(--bar);height:100%}.fill.hot{background:var(--hot)}
-table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px 6px;
-border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500;border:0}
-.scroll{overflow-x:auto}.flag{display:block;background:var(--chip);border-radius:6px;
-padding:3px 8px;margin:3px 0;font-size:13px}.ok{color:var(--ok)}.bad{color:var(--hot)}
-code{font-size:13px}
-.issue{margin:10px 0}.issue h3{margin:0;font-size:15px}.issue .head{display:flex;gap:10px;
-align-items:baseline;justify-content:space-between;flex-wrap:wrap}
-button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bar);color:#fff;
-border-radius:6px;padding:5px 10px;cursor:pointer}button.ghost{background:transparent;color:var(--ink)}
-details{margin-top:6px}summary{cursor:pointer;color:var(--muted);font-size:13px}
-pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--bg);
-border:1px solid var(--line);border-radius:6px;padding:8px;margin:6px 0 0}
-textarea.src{position:absolute;left:-9999px;width:1px;height:1px}
+font:14px/1.45 system-ui,sans-serif}main{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:18px;margin:0}h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;
+color:var(--muted);margin:18px 0 6px;font-weight:600}.muted{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.verdict{font-size:15px;margin-top:2px}.verdict b.bad{color:var(--hot)}.verdict b.ok{color:var(--ok)}
+.stats{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}.stats div b{font-size:17px;margin-right:4px}
+.issue{display:grid;grid-template-columns:24px minmax(0,1fr) 120px auto;gap:10px;align-items:start;
+padding:8px 0;border-top:1px solid var(--line)}.issue:first-child{border-top:0}
+.issue .n{font-weight:700;color:var(--hot)}.issue .t{font-weight:600}.issue .fix{color:var(--muted)}
+.share{font-size:12px;color:var(--muted)}.track{background:var(--line);border-radius:3px;height:6px;
+overflow:hidden;margin-top:3px}.fill{background:var(--bar);height:100%}.fill.hot{background:var(--hot)}
+button{font:inherit;font-size:12px;border:1px solid var(--line);background:transparent;color:var(--ink);
+border-radius:6px;padding:4px 9px;cursor:pointer;white-space:nowrap}button.primary{background:var(--bar);
+border-color:var(--bar);color:#fff}details>summary{cursor:pointer;color:var(--muted);font-size:12px}
+pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:var(--bg);border:1px solid
+var(--line);border-radius:6px;padding:8px;margin:6px 0 0}textarea.src{position:absolute;left:-9999px;
+width:1px;height:1px}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:5px 6px;
+border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:500;border:0;
+font-size:12px}.scroll{overflow-x:auto}.ok{color:var(--ok)}.bad{color:var(--hot)}
+.flag{display:inline-block;background:var(--chip);border-radius:4px;padding:1px 6px;margin:1px 2px 1px 0;
+font-size:12px}.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.row{display:grid;grid-template-columns:80px 1fr 110px;gap:8px;align-items:center;margin:4px 0;font-size:13px}
+.row .track{height:10px;margin:0}.more{margin-top:18px}.more>summary{font-size:13px;color:var(--ink);font-weight:600}
 .chart{width:100%;min-width:560px;height:auto;display:block}.chart rect.c{fill:var(--bar)}
 .chart rect.h{fill:var(--hot)}.chart line{stroke:var(--line);stroke-width:1}
 .chart line.base{stroke:var(--muted)}.chart text{fill:var(--muted);font-size:11px;text-anchor:end}
-.chart text.x{text-anchor:start}.legend{display:flex;gap:16px;font-size:13px;margin-bottom:6px}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+.chart text.x{text-anchor:start}.legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px}
 .legend i.c{background:var(--bar)}.legend i.h{background:var(--hot)}
+.chart path{fill:none;stroke-width:2}.chart path.actual{stroke:var(--hot)}
+.chart path.bench{stroke:var(--bar);stroke-dasharray:6 4}.chart path.budget{stroke:var(--muted);
+stroke-dasharray:2 4}.chart rect.hit{fill:transparent}.chart text.end{text-anchor:end;fill:var(--ink)}
+.legend i.b{background:var(--muted)}.kpis{display:grid;grid-template-columns:repeat(auto-fit,
+minmax(260px,1fr));gap:10px;margin-top:10px}.kpi b{font-size:16px}.spark{width:100%;height:70px;
+display:block;margin:4px 0}.spark polyline{fill:none;stroke:var(--muted);stroke-width:1.5}
+.spark circle.c{fill:var(--bar)}.spark circle.h{fill:var(--hot)}.spark line.target{stroke:var(--ok);
+stroke-dasharray:4 3;stroke-width:1.5}
+@media (max-width:640px){.issue{grid-template-columns:20px minmax(0,1fr)}.issue .share,.issue .act{grid-column:2}}
 """
 
 
@@ -766,13 +799,13 @@ def render_timeline(timeline):
     if not timeline:
         return ""
     from html import escape as e
-    width, height, left, bottom = 960, 220, 44, 24
+    width, height, left, bottom = 960, 150, 40, 20
     peak = max(a + b for _, (a, b) in timeline) or 1
     start, end = timeline[0][0], timeline[-1][0]
     hours = int((end - start).total_seconds() // 3600) + 1
     step = (width - left) / hours
     bar = max(step - 2, 1)
-    scale = (height - bottom - 8) / peak
+    scale = (height - bottom - 6) / peak
     marks = []
     for when, (cool, hot) in timeline:
         x = left + int((when - start).total_seconds() // 3600) * step
@@ -794,102 +827,224 @@ def render_timeline(timeline):
     for n in range(0, hours, max(hours // 8, 1)):
         when = start + datetime.timedelta(hours=n)
         labels.append('<text class="x" x="%.1f" y="%d">%s</text>' % (
-            left + n * step, height - 6, when.astimezone().strftime("%a %H:00")))
-    return ('<h2>Spend over time</h2><div class="card scroll"><div class="legend">'
+            left + n * step, height - 5, when.astimezone().strftime("%a %H:00")))
+    return ('<div class="card scroll"><div class="top"><div class="legend">'
             '<span><i class="c"></i>turns under 300k context</span>'
             '<span><i class="h"></i>turns over 300k context</span></div>'
-            '<svg class="chart" viewBox="0 0 %d %d" role="img" aria-label="Hourly weighted '
-            'token spend, split by context size">%s%s%s<line class="base" x1="%d" x2="%d" '
-            'y1="%d" y2="%d"/></svg><p class="muted">Weighted tokens per hour. Hover a bar '
-            'for its values.</p></div>' % (width, height, "".join(grid), "".join(marks),
-                                           "".join(labels), left, width, height - bottom,
-                                           height - bottom))
+            '<span class="muted" style="font-size:12px">weighted tokens per hour · hover a bar'
+            '</span></div><svg class="chart" viewBox="0 0 %d %d" role="img" aria-label="Hourly '
+            'weighted token spend, split by context size">%s%s%s<line class="base" x1="%d" '
+            'x2="%d" y1="%d" y2="%d"/></svg></div>' % (
+                width, height, "".join(grid), "".join(marks), "".join(labels), left, width,
+                height - bottom, height - bottom))
+
+
+def _scale_fn(lo, hi, a, b):
+    return lambda v: a + (b - a) * ((v - lo) / ((hi - lo) or 1))
+
+
+def render_burndown(r):
+    """Cumulative spend against the benchmark and an optional weekly budget, as inline SVG."""
+    from html import escape as e
+    rows = r["hourly"]
+    if len(rows) < 2:
+        return ""
+    actual = dict(r["timeline"])
+    start, end = rows[0][0], rows[-1][0] + datetime.timedelta(hours=1)
+    width, height, left, bottom = 960, 190, 48, 20
+    run_a = run_b = 0.0
+    pts_a, pts_b, cols = [], [], []
+    for when, slot in rows:
+        run_a += sum(actual.get(when, (0, 0)))
+        run_b += slot["bench"]
+        pts_a.append((when + datetime.timedelta(hours=1), run_a))
+        pts_b.append((when + datetime.timedelta(hours=1), run_b))
+    budget_end = None
+    top = run_a
+    if r["budget"]:
+        per_hour = r["budget"] / (7 * 24)
+        top = max(top, per_hour * (end - start).total_seconds() / 3600)
+        rate_now = run_a / max((end - start).total_seconds() / 3600, 1)
+        budget_end = start + datetime.timedelta(hours=r["budget"] / max(rate_now, 1))
+    x = _scale_fn(start.timestamp(), end.timestamp(), left, width)
+    y = _scale_fn(0, top * 1.05, height - bottom, 6)
+    path = lambda pts: "M%.1f,%.1f " % (x(start.timestamp()), y(0)) + " ".join(
+        "L%.1f,%.1f" % (x(t.timestamp()), y(v)) for t, v in pts)
+    parts = ['<line class="base" x1="%d" x2="%d" y1="%d" y2="%d"/>' % (
+        left, width, height - bottom, height - bottom)]
+    for frac in (0.5, 1.0):
+        v = top * frac
+        parts.append('<line x1="%d" x2="%d" y1="%.1f" y2="%.1f"/><text x="%d" y="%.1f">%.0fM'
+                     '</text>' % (left, width, y(v), y(v), left - 6, y(v) + 4, v / 1e6))
+    if r["budget"]:
+        hours = (end - start).total_seconds() / 3600
+        parts.append('<path class="budget" d="M%.1f,%.1f L%.1f,%.1f"/>' % (
+            x(start.timestamp()), y(0), x(end.timestamp()), y(r["budget"] / 168 * hours)))
+    parts.append('<path class="bench" d="%s"/>' % path(pts_b))
+    parts.append('<path class="actual" d="%s"/>' % path(pts_a))
+    for (t, va), (_, vb) in zip(pts_a, pts_b):
+        parts.append('<rect class="hit" x="%.1f" y="0" width="%.1f" height="%d"><title>%s  '
+                     'actual %.0fM · benchmark %.0fM</title></rect>' % (
+                         x(t.timestamp()) - 6, 12, height - bottom,
+                         e(t.astimezone().strftime("%a %H:00")), va / 1e6, vb / 1e6))
+    parts.append('<text class="end" x="%.1f" y="%.1f">%.0fM</text>' % (
+        width - 2, y(run_a) - 4, run_a / 1e6))
+    parts.append('<text class="end" x="%.1f" y="%.1f">%.0fM</text>' % (
+        width - 2, y(run_b) - 4, run_b / 1e6))
+    note = "Benchmark saves %.0f%% (estimate: same turns, cached context trimmed to %dk)." % (
+        100 * (1 - run_b / run_a), BENCH_WINDOW / 1000)
+    if budget_end:
+        note += " At the current rate the weekly budget runs out %s." % (
+            budget_end.astimezone().strftime("%a %d %b %H:00"))
+    legend = ('<span><i class="h"></i>actual cumulative spend</span><span><i class="c"></i>'
+              'benchmark: %dk compaction window</span>%s' % (
+                  BENCH_WINDOW / 1000, '<span><i class="b"></i>weekly budget pace</span>'
+                  if r["budget"] else ""))
+    return ('<div class="card scroll"><div class="top"><div class="legend">%s</div></div>'
+            '<svg class="chart" viewBox="0 0 %d %d" role="img" aria-label="Cumulative token '
+            'spend against benchmark">%s</svg><div class="muted" style="font-size:12px">%s'
+            '</div></div>' % (legend, width, height, "".join(parts), e(note)))
+
+
+def render_kpis(r):
+    """Small multiples: each KPI per 3-hour block against its target line."""
+    from html import escape as e
+    blocks = collections.OrderedDict()
+    for when, slot in r["hourly"]:
+        key = when.replace(hour=when.hour - when.hour % 3)
+        b = blocks.setdefault(key, {"ctx": [], "reads": 0, "calls": 0})
+        b["ctx"] += slot["ctx"]
+        b["reads"] += slot["reads"]
+        b["calls"] += slot["calls"]
+    if len(blocks) < 2:
+        return ""
+    med = lambda xs: sorted(xs)[len(xs) // 2] if xs else 0
+    kpis = [
+        ("Median context per turn", 150_000, lambda v: "%dk" % (v / 1000),
+         [med(b["ctx"]) for b in blocks.values()]),
+        ("Turns over 300k context", 0.10, lambda v: "%.0f%%" % (100 * v),
+         [sum(c >= 300_000 for c in b["ctx"]) / max(len(b["ctx"]), 1) for b in blocks.values()]),
+        ("Caller reads per tool call", 0.20, lambda v: "%.0f%%" % (100 * v),
+         [b["reads"] / max(b["calls"], 1) for b in blocks.values()]),
+    ]
+    cards = []
+    w, h, pad = 300, 70, 4
+    for name, target, fmt, vals in kpis:
+        top = max(max(vals), target) * 1.1 or 1
+        x = _scale_fn(0, len(vals) - 1, pad, w - pad)
+        y = _scale_fn(0, top, h - pad, pad)
+        line = " ".join("%.1f,%.1f" % (x(i), y(v)) for i, v in enumerate(vals))
+        dots = "".join('<circle class="%s" cx="%.1f" cy="%.1f" r="2.5"><title>%s</title></circle>'
+                       % ("h" if v > target else "c", x(i), y(v), fmt(v))
+                       for i, v in enumerate(vals))
+        last = vals[-1]
+        cards.append('<div class="card kpi"><div class="top"><span>%s</span><b class="%s">%s'
+                     '</b></div><svg class="spark" viewBox="0 0 %d %d" role="img" aria-label="%s'
+                     ' per 3 hours"><line class="target" x1="0" x2="%d" y1="%.1f" y2="%.1f"/>'
+                     '<polyline points="%s"/>%s</svg><div class="muted" style="font-size:12px">'
+                     'target %s · latest block %s · per 3 hours</div></div>' % (
+                         e(name), "bad" if last > target else "ok", fmt(last), w, h, e(name), w,
+                         y(target), y(target), line, dots, fmt(target), fmt(last)))
+    return '<div class="kpis">%s</div>' % "".join(cards)
 
 
 def render_html(r):
     from html import escape as e
     bar = lambda pct, hot=False: ('<div class="track"><div class="fill%s" style="width:%.1f%%">'
                                   '</div></div>' % (" hot" if hot else "", min(pct, 100)))
-    out = ['<!doctype html><html lang="en"><head><meta charset="utf-8">'
-           '<meta name="viewport" content="width=device-width,initial-scale=1">'
-           '<title>Token Burn Report</title><style>%s</style><script>%s</script></head>'
-           '<body><main>' % (HTML_STYLE, COPY_SCRIPT),
-           '<h1>Token burn: last %d days</h1><div class="muted">Generated %s by '
-           '<code>burn.py</code>. Units are base-input-equivalent tokens.</div>' % (
-               r["days"], datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))]
-    tiles = [("%.0fM" % (r["total"] / 1e6), "weighted tokens"),
-             ("%d" % r["session_count"], "sessions"), ("%d" % r["turns"], "turns"),
-             ("%.0f%%" % r["over_300k"], "spend on turns over 300k")]
-    if r["preamble"]:
-        tiles.append(("%dk" % (r["preamble"][0] / 1000), "preamble per session (p50)"))
-    out.append('<div class="tiles">%s</div>' % "".join(
-        '<div class="tile"><b>%s</b><span class="muted">%s</span></div>' % t for t in tiles))
-
-    out.append(render_timeline(r["timeline"]))
     issues = top_issues(r)
     prompts = [issue_prompt(i, r) for i in issues]
+    gaps = [row for row in r["baseline"] if not row[3]]
+    out = ['<!doctype html><html lang="en"><head><meta charset="utf-8">'
+           '<meta name="viewport" content="width=device-width,initial-scale=1">'
+           '<title>Token Doctor</title><style>%s</style><script>%s</script></head>'
+           '<body><main>' % (HTML_STYLE, COPY_SCRIPT)]
+
+    # 1. Verdict and the one action that matters most.
+    verdict = ('<b class="bad">%d leak%s found</b> · %.0f%% of spend is on turns over 300k '
+               'context' % (len(issues), "" if len(issues) == 1 else "s", r["over_300k"])
+               if issues else '<b class="ok">Healthy</b> · no common token leaks found')
+    copy_all = ""
     if issues:
         everything = "\n\n---\n\n".join(
-            ["Here are the top token leaks from my burn.py report, largest first. Fix them in "
-             "this order and report after each one."] + prompts)
-        out.append('<h2>Top issues to fix</h2><div class="card">'
-                   '<textarea class="src" id="p-all" readonly>%s</textarea>'
-                   '<button onclick="copyText(\'p-all\',this)">Copy all issues for Claude</button>'
-                   % e(everything))
+            ["Here are the top token leaks from my token doctor report, largest first. Fix "
+             "them in this order and report after each one."] + prompts)
+        copy_all = ('<textarea class="src" id="p-all" readonly>%s</textarea><button '
+                    'class="primary" onclick="copyText(\'p-all\',this)">Copy all fixes for '
+                    'Claude</button>' % e(everything))
+    out.append('<div class="top"><div><h1>Token Doctor</h1><div class="verdict">%s</div></div>'
+               '%s</div>' % (verdict, copy_all))
+    stats = [("%.0fM" % (r["total"] / 1e6), "weighted tokens"),
+             ("%d" % r["session_count"], "sessions"), ("%d" % r["turns"], "turns"),
+             ("%d/%d" % (len(gaps), len(r["baseline"])), "baseline levers off target")]
+    out.append('<div class="stats muted">%s<span>last %d days · %s</span></div>' % (
+        "".join('<div><b style="color:var(--ink)">%s</b>%s</div>' % s for s in stats),
+        r["days"], datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+
+    # 2. KPI monitor: burndown against the benchmark, then each KPI against its target.
+    out.append('<h2>Burndown vs benchmark</h2>' + render_burndown(r) + render_kpis(r))
+
+    # 3. The leaks, ranked, one row each.
+    if issues:
+        out.append('<h2>Leaks to fix, largest first</h2><div class="card">')
         for n, (issue, prompt) in enumerate(zip(issues, prompts), 1):
-            share = ("%.0f%% of spend · %d sessions" % (issue["share"], len(issue["hits"]))
-                     if issue["share"] is not None else "config")
-            out.append('<div class="issue card"><div class="head"><h3>%d. %s</h3>'
-                       '<span class="muted">%s</span></div><div class="muted">%s</div>'
-                       '<textarea class="src" id="p-%d" readonly>%s</textarea>'
-                       '<details><summary>Details and prompt</summary><pre>%s</pre></details>'
-                       '<button class="ghost" onclick="copyText(\'p-%d\',this)">'
-                       'Copy for Claude</button></div>' % (
-                           n, e(issue["title"]), share, e(issue["why"]), n, e(prompt),
-                           e(prompt), n))
+            share = ('%.0f%% of spend · %d sessions%s' % (
+                issue["share"], len(issue["hits"]), bar(issue["share"], True))
+                if issue["share"] is not None else "config")
+            out.append('<div class="issue"><span class="n">%d</span><div><div class="t">%s</div>'
+                       '<div class="fix">%s</div><details><summary>evidence and prompt'
+                       '</summary><pre>%s</pre></details></div><div class="share">%s</div>'
+                       '<div class="act"><textarea class="src" id="p-%d" readonly>%s</textarea>'
+                       '<button onclick="copyText(\'p-%d\',this)">Copy for Claude</button></div>'
+                       '</div>' % (n, e(issue["title"]), e(issue["fix"]), e(prompt), share, n,
+                                   e(prompt), n))
         out.append('</div>')
 
-    out.append('<h2>Recommended baseline</h2><div class="card scroll"><table><tr><th>Lever</th>'
-               '<th>Now</th><th>Recommended</th><th>Status</th></tr>%s</table></div>' % "".join(
-                   '<tr><td>%s</td><td>%s</td><td class="muted">%s</td><td class="%s">%s</td>'
-                   '</tr>' % (e(n), e(v), e(t), "ok" if ok else "bad", "ok" if ok else "fix")
-                   for n, v, t, ok in r["baseline"]))
+    # 4. Baseline: off-target levers first.
+    rows = sorted(r["baseline"], key=lambda row: row[3])
+    out.append('<h2>Baseline: now vs recommended</h2><div class="card scroll"><table><tr>'
+               '<th>Lever</th><th>Now</th><th>Recommended</th><th></th></tr>%s</table></div>'
+               % "".join('<tr><td>%s</td><td><b>%s</b></td><td class="muted">%s</td>'
+                         '<td class="%s">%s</td></tr>' % (
+                             e(n), e(v), e(t), "ok" if ok else "bad", "ok" if ok else "fix")
+                         for n, v, t, ok in rows))
 
-    out.append('<h2>Spend by context size of the turn</h2><div class="card">')
-    for label, low, pct, turns in r["buckets"]:
-        out.append('<div class="row"><span>%s</span>%s<span class="muted">%.1f%% · %d turns'
-                   '</span></div>' % (label, bar(pct, low >= 300), pct, turns))
-    out.append('<p class="muted">Cost per turn scales with context. Red buckets are turns '
-               'over 300k: compact earlier or start fresh sessions.</p></div>')
+    out.append('<h2>Spend per hour</h2>' + render_timeline(r["timeline"]))
 
-    out.append('<h2>Top sessions and leak checks</h2><div class="card scroll"><table>'
-               '<tr><th>Share</th><th>Session</th><th>Turns</th><th>Peak</th><th>Age</th>'
-               '<th>Leaks and fixes</th></tr>')
+    # 5. Everything else, collapsed.
+    out.append('<details class="more"><summary>Sessions, context sizes, projects, config'
+               '</summary>')
+    out.append('<h2>Top sessions</h2><div class="card scroll"><table><tr><th>Share</th>'
+               '<th>Session</th><th>Turns</th><th>Peak</th><th>Age</th><th>Leaks</th></tr>')
     for s in r["sessions"]:
-        flags = "".join('<span class="flag">%s</span>' % e(f) for f in s["flags"]) or \
-            '<span class="ok">none</span>'
-        out.append('<tr><td>%.1f%%%s</td><td><b>%s</b><br><span class="muted">%s %s · '
-                   '%s</span></td><td>%d</td><td>%dk</td><td>%.0fh</td><td>%s</td></tr>' % (
-                       s["share"], bar(s["share"] * 3, s["share"] >= 10),
-                       e(s["title"] or "(untitled)"), s["source"], s["id"],
-                       e(s["project"][-40:]), s["turns"], s["peak"] / 1000, s["hours"], flags))
-    out.append('</table></div>')
-
+        flags = "".join('<span class="flag">%s</span>' % e(f.split(".")[0])
+                        for f in s["flags"]) or '<span class="ok">none</span>'
+        out.append('<tr><td>%.1f%%</td><td><b>%s</b><br><span class="muted">%s %s</span></td>'
+                   '<td>%d</td><td>%dk</td><td>%.0fh</td><td>%s</td></tr>' % (
+                       s["share"], e(s["title"] or "(untitled)"), s["source"], s["id"],
+                       s["turns"], s["peak"] / 1000, s["hours"], flags))
+    out.append('</table></div><div class="grid2"><div><h2>Spend by context size</h2>'
+               '<div class="card">')
+    for label, low, pct, turns in r["buckets"]:
+        out.append('<div class="row"><span>%s</span>%s<span class="muted">%.1f%% · %d</span>'
+                   '</div>' % (label, bar(pct, low >= 300), pct, turns))
+    out.append('</div></div><div><h2>Top projects</h2><div class="card">')
+    for name, pct in r["projects"]:
+        out.append('<div class="row"><span>%.1f%%</span>%s<span class="muted" style="overflow:'
+                   'hidden;text-overflow:ellipsis;white-space:nowrap">%s</span></div>' % (
+                       pct, bar(pct), e(name[-40:])))
+    out.append('</div></div></div>')
     out.append('<h2>Config checks</h2><div class="card">%s</div>' % "".join(
         '<div class="%s">%s</div>' % ("ok" if line.endswith("ok.") or line == "none" else "bad",
                                       e(line)) for line in r["config"]))
-
-    out.append('<h2>Top projects</h2><div class="card">')
-    for name, pct in r["projects"]:
-        out.append('<div class="row"><span>%.1f%%</span>%s<span class="muted" '
-                   'style="overflow:hidden;text-overflow:ellipsis">%s</span></div>' % (
-                       pct, bar(pct), e(name[-40:])))
-    out.append('</div><h2>Tool calls</h2><div class="card">%s</div>' % " · ".join(
+    out.append('<h2>Tool calls</h2><div class="card">%s</div>' % " · ".join(
         "%s <b>%d</b>" % (e(n or "?"), v) for n, v in r["tools"]))
     if r["unpriced"]:
         out.append('<h2>Unpriced models</h2><div class="card bad">Counted at 1.0x: %.0f%% of '
                    'spend. %s</div>' % (r["unpriced"][0], e(", ".join(
                        "%s (%d turns)" % m for m in r["unpriced"][1]))))
+    out.append('<p class="muted" style="font-size:12px">Units are base-input-equivalent '
+               'tokens. Generated by token-savings-inspection burn.py.</p></details>')
     out.append("</main></body></html>\n")
     return "\n".join(out)
 

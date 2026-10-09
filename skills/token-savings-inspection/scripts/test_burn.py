@@ -60,10 +60,11 @@ def main():
             assert expected in out, "missing %r in:\n%s" % (expected, out)
         with open(os.path.join(root, "report.html")) as fh:
             page = fh.read()
-        assert "<title>Token Burn Report</title>" in page and "caller reads: 300" in page
-        assert "Top issues to fix" in page and "Copy all issues for Claude" in page
+        assert "<title>Token Doctor</title>" in page and "caller reads: 300" in page
+        assert "Leaks to fix" in page and "Copy all fixes for Claude" in page
         assert "transcript: " in page and "Sessions compact too late" in page
-        assert "Recommended baseline" in page and "<svg class=\"chart\"" in page
+        assert "Burndown vs benchmark" in page and "Caller reads per tool call" in page
+        assert "Baseline: now vs recommended" in page and "<svg class=\"chart\"" in page
 
         doctor = subprocess.run([os.path.join(HERE, "doctor"), "2", "--source", "claude"],
                                 env=dict(os.environ, CLAUDE_CONFIG_DIR=root,
