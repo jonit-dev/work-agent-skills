@@ -60,18 +60,20 @@ def main():
             assert expected in out, "missing %r in:\n%s" % (expected, out)
         with open(os.path.join(root, "report.html")) as fh:
             page = fh.read()
-        assert "<title>Token Doctor</title>" in page and "caller reads: 300" in page
+        assert "<title>Claude Token Doctor</title>" in page and "caller reads: 300" in page
         assert "Leaks to fix" in page and "Copy all fixes for Claude" in page
         assert "transcript: " in page and "Sessions compact too late" in page
         assert "Burndown vs benchmark" in page and "Caller reads per tool call" in page
+        assert "Burn rate, last hour" in page and "your 2-day average" in page
+        assert "Active now" in page and "No session had a turn" in page
         assert "Baseline: now vs recommended" in page and "<svg class=\"chart\"" in page
 
         doctor = subprocess.run([os.path.join(HERE, "doctor"), "2", "--source", "claude"],
                                 env=dict(os.environ, CLAUDE_CONFIG_DIR=root,
-                                         XDG_CACHE_HOME=root), capture_output=True, text=True)
+                                         XDG_CACHE_HOME=root, TOKEN_DOCTOR_PORT="0"), capture_output=True, text=True)
         assert doctor.returncode == 1, doctor.stdout + doctor.stderr
         assert "Verdict: 7 leaks found" in doctor.stdout, doctor.stdout
-        assert os.path.exists(os.path.join(root, "token-savings-inspection", "report.html"))
+        assert os.path.exists(os.path.join(root, "claude-token-doctor", "report.html"))
 
         with open(os.path.join(root, "settings.json"), "w") as fh:
             json.dump({"autoCompactWindow": 200000}, fh)
