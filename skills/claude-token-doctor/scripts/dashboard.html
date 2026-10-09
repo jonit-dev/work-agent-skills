@@ -285,8 +285,10 @@ const KpiStrip = ({r, burn, source}) => {
   if (used != null && left != null) {
     const elapsed = 100 * (1 - left / 168);
     // Tokens left at reset: goal is the remaining budget spread over the hours left.
-    const dry = rate > 0 ? (goal * left) / rate : Infinity;
-    const crit = dry <= left;
+    // One run-out for the tile and the chart, from the server: points left at the last-24 h pace.
+    const proj = burn.projection;
+    const dry = proj ? (proj.hoursToEmpty ?? Infinity) : rate > 0 ? (goal * left) / rate : Infinity;
+    const crit = proj ? proj.runsOut != null : dry <= left;
     const reset = burn.resets ? toDate(burn.resets) : null;
     const g = burn.gains ?? {};
     // Even pace spends 100/168 pts per hour.
@@ -301,7 +303,7 @@ const KpiStrip = ({r, burn, source}) => {
     const empty = crit ? new Date(Date.now() + dry * 3600e3) : null;
     tiles.push(html`<${Tile} key="dry" label="Runs out in" value=${crit ? hoursLabel(dry) : 'never'}
         line=${crit ? '~' + dayTime(empty) : 'no run-out'}
-        tip=${`At this burn: ${crit ? 'empty ~' + dayTime(empty) : 'budget lasts the week'} · reset in ${hoursLabel(left)}${reset ? ' · ' + dayTime(reset) : ''}`}
+        tip=${`At the last-24 h pace: ${crit ? 'empty ~' + dayTime(empty) : 'budget lasts the week'} · reset in ${hoursLabel(left)}${reset ? ' · ' + dayTime(reset) : ''}`}
         state=${crit ? 'crit' : 'ok'}>
         <div class="space-y-0.5" aria-hidden="true">
           <${Bar} pct=${100 * Math.min(dry, scale) / scale} cls=${crit ? 'bg-hot' : 'bg-ok'} />
@@ -313,14 +315,14 @@ const KpiStrip = ({r, burn, source}) => {
   }
   const over = Number(r.over300k) || 0;
   const overHourly = (r.timeline ?? []).slice(-24).map(t => 100 * (t[2] ?? 0) / (((t[1] ?? 0) + (t[2] ?? 0)) || 1));
-  tiles.push(html`<${Tile} key="over" label="Spend >300k" value=${Math.round(over) + '%'}
+  tiles.push(html`<${Tile} key="over" label=${'Spend >300k · ' + (r.days ?? 0) + ' d'} value=${Math.round(over) + '%'}
     line=${fmt(r.total) + ' · ' + (r.days ?? 0) + ' d'} tip=${'Spend over 300k context · ' + fmt(r.total) + ' tokens in ' + (r.days ?? 0) + ' d'}
     state=${over >= 50 ? 'over' : 'ok'}>
     <${Spark} values=${overHourly} target=${50} over=${over >= 50} /></${Tile}>`);
   for (const k of r.kpis ?? []) {
     const vals = k.values ?? [], last = vals[vals.length - 1];
     const isOver = k.target != null && last != null && last > k.target;
-    tiles.push(html`<${Tile} key=${k.name} label=${SHORT[k.name] ?? k.name} tip=${k.name + ' · latest 3 h block' + (k.target != null ? ' · target ' + kpiFmt(k, k.target) : '')} value=${last == null ? '—' : kpiFmt(k, last)}
+    tiles.push(html`<${Tile} key=${k.name} label=${(SHORT[k.name] ?? k.name) + ' · 3 h'} tip=${k.name + ' · latest 3 h block' + (k.target != null ? ' · target ' + kpiFmt(k, k.target) : '')} value=${last == null ? '—' : kpiFmt(k, last)}
       line=${k.target != null ? 'target ' + kpiFmt(k, k.target) : ''}
       state=${k.target == null || last == null ? null : isOver ? 'over' : 'ok'}>
       <${Spark} values=${vals} target=${k.target ?? null} over=${isOver} /></${Tile}>`);
