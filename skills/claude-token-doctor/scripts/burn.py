@@ -554,8 +554,9 @@ def plan_week():
     import subprocess
     import time
     import urllib.request
-    if time.time() - _CACHE.get("week", (0, None))[0] < 300:
-        return _CACHE["week"][1]
+    fetched, last = _CACHE.get("week", (0, None))
+    if time.time() - fetched < (300 if last else 60):
+        return last
     week = None
     try:
         try:
@@ -574,7 +575,7 @@ def plan_week():
         week = {"start": resets - datetime.timedelta(days=7), "resets": resets,
                 "used": float(data["utilization"])}
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-        pass
+        week = last  # a failed call keeps the last good reading and retries after 60 s
     _CACHE["week"] = (time.time(), week)
     return week
 
