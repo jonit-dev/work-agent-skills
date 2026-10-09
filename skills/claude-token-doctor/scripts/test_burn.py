@@ -14,9 +14,10 @@ def record(kind, when, **extra):
     return json.dumps({"type": kind, "timestamp": when.isoformat(), **extra})
 
 
-def assistant(when, context, calls=()):
+def assistant(when, context, calls=(), write=0):
     content = [{"type": "tool_use", "name": n, "input": {"command": c}} for n, c in calls]
-    usage = {"input_tokens": 10, "cache_read_input_tokens": context, "output_tokens": 50}
+    usage = {"input_tokens": 10, "cache_read_input_tokens": context,
+             "cache_creation_input_tokens": write, "output_tokens": 50}
     return record("assistant", when, message={"model": "claude-opus-5-5", "usage": usage,
                                               "content": content})
 
@@ -43,13 +44,15 @@ def check_last_24h():
         os.makedirs(project)
         for name, age, context in (("old", datetime.timedelta(days=3), 900_000),
                                    ("new", datetime.timedelta(hours=2), 100_000)):
+            # The recent session writes cache every turn and jumps 100k once (a pasted dump).
             lines = [user(now - age, "go")] + [
-                assistant(now - age + datetime.timedelta(seconds=i * 60), context)
+                assistant(now - age + datetime.timedelta(seconds=i * 60),
+                          context + (100_000 if name == "new" and i >= 10 else 0),
+                          write=20_000 if name == "new" else 0)
                 for i in range(20)]
             with open(os.path.join(project, name + "-session.jsonl"), "w") as fh:
                 fh.write("\n".join(lines) + "\n")
         out = run(root, days="7")
-        assert "ok   Spend on turns over 300k" in out, out
         assert "late compaction" not in out, out
         with open(os.path.join(root, "report.html")) as fh:
             page = fh.read()
@@ -57,7 +60,51 @@ def check_last_24h():
                                                                               page.index("window.__REPORT__"))])
         row = next(b for b in data["baseline"] if b["name"].startswith("Spend on turns"))
         assert row["ok"] and row["now_24h"] == "0%" and row["value_7d"] != "0%", row
+        by = {b["name"]: b for b in data["baseline"]}
+        assert by["Big tool results"]["now_24h"] == "5.0%", by["Big tool results"]
+        assert by["Big tool results"]["level"] == "critical"  # 5% against under 2%: ratio 2.5
+        assert by["Cache rebuilds"]["level"] == "warn", by["Cache rebuilds"]  # ~14% against 10%
+        top = by["Spend on the top model"]  # advisory: opus only, so never worse than info
+        assert top["advisory"] and top["level"] == "info" and not top["ok"], top
         assert not any("compact too late" in i["title"] for i in data["issues"])
+
+
+def check_severity():
+    sys.path.insert(0, HERE)
+    import burn
+    assert [burn.severity(x) for x in (0.9, 1.0, 1.5, 2.0, 3)] == [
+        "ok", "ok", "warn", "warn", "critical"]
+
+
+def check_weekly_quota():
+    """With a weekly reading: %/h matches tokens/h, and the weekly burndown ends at the reading."""
+    import time
+    now = datetime.datetime.now(datetime.timezone.utc)
+    with tempfile.TemporaryDirectory() as root:
+        project = os.path.join(root, "projects", "demo")
+        os.makedirs(project)
+        cache = os.path.join(root, "claude-token-doctor")
+        os.makedirs(cache)
+        with open(os.path.join(cache, "usage.json"), "w") as fh:
+            json.dump({"fetched": time.time(), "seven_day": {
+                "utilization": 40, "resets_at": time.time() + 3 * 86400}}, fh)
+        whens = ([now - datetime.timedelta(hours=30) + datetime.timedelta(minutes=10 * i)
+                  for i in range(150)]
+                 + [now - datetime.timedelta(minutes=30 - 5 * i) for i in range(5)])
+        with open(os.path.join(project, "s-week.jsonl"), "w") as fh:
+            fh.write("\n".join(assistant(w, 200_000) for w in whens) + "\n")
+        run(root, days="7")
+        with open(os.path.join(root, "report.html")) as fh:
+            page = fh.read()
+        start = page.index("window.__REPORT__ = ") + 20
+        data = json.loads(page[start:page.index("</script>", start)].replace("<\\/", "</"))
+        burn = data["burns"]["claude"]
+        assert burn["rate"] > 0 and abs(burn["ratePct"] * burn["limit"] / 100 - burn["rate"]) < 1e-6 * burn["rate"], burn
+        points = burn["weekBurndown"]
+        assert abs(points[-1][1] - burn["used"]) < 0.5, (points[-1], burn["used"])
+        assert points[0][1] == 0 and all(a[1] <= b[1] and a[0] <= b[0] for a, b in zip(points, points[1:]))
+        assert points[-1][2] <= points[-1][1]
+        assert burn["projection"]["ratePct"] > 0
 
 
 def main():
@@ -144,5 +191,7 @@ def check_codex_week():
 
 if __name__ == "__main__":
     main()
+    check_severity()
     check_last_24h()
+    check_weekly_quota()
     check_codex_week()
