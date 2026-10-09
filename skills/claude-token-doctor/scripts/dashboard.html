@@ -342,36 +342,49 @@ const Dashboard = ({r, burn, sources, source, onSource}) => {
   </div>`;
 };
 
-const badge = (p) => (p === 1 ? 'bg-hot/10 text-hot' : p === 2 ? 'bg-accent/10 text-accent' : 'bg-chip text-muted');
-
-const LeakRow = ({i}) => {
-  const meta = i.share == null ? 'config check' : `${sharePct(i.share)} of spend · ${plural(i.sessions ?? 0, 'session')}`;
-  return html`<${Card}>
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="text-xs font-bold px-2 py-0.5 rounded ${badge(i.priority)}">P${i.priority}</span>
-      <span class="font-medium">${i.title}</span>
+// One row per leak. The row opens in place; the prompt holds the why text and the evidence lines.
+const LeakRow = ({i, open, onToggle}) => {
+  const meta = i.share == null ? 'config check' : `${Math.round(i.share)}% · ${plural(i.sessions ?? 0, 'session')}`;
+  const why = (String(i.prompt ?? '').match(/Why it costs tokens: (.*)/) ?? [])[1];
+  const evidence = String(i.prompt ?? '').split('\n').filter(l => l.startsWith('- '))
+    // "- title (session id, 20.4% of spend, ...): label: measure. advice" -> "title · id · 20.4% · measure"
+    .map(l => { const m = l.match(/^- (.*) \(session (\w+), ([\d.]+)% of spend[^)]*\): [^:]+: (.*?)(?:\. |\.$|$)/);
+      return m ? [m[1], m[2], m[3] + '%', m[4].replace(' in this session', '')].join(' · ') : l.slice(2); });
+  return html`<li class="border-t border-line first:border-t-0">
+    <div class="flex items-center gap-2">
+      <button type="button" aria-expanded=${open} onClick=${onToggle}
+        class="flex-1 min-w-0 text-left grid items-center gap-x-3 gap-y-0.5 py-2 grid-cols-[0.5rem_minmax(0,1fr)] md:grid-cols-[0.5rem_19rem_15.5rem_minmax(0,1fr)]">
+        <span class="size-2 rounded-full ${i.priority === 1 ? 'bg-accent' : 'bg-muted'}" title=${'Priority ' + i.priority}></span>
+        <span class="text-sm font-medium truncate" title=${i.title}>${i.title}</span>
+        <span class="col-start-2 md:col-start-auto flex items-center gap-2 text-xs text-muted">
+          <span class="w-20 h-1.5 rounded bg-line overflow-hidden shrink-0">${i.share == null ? null
+            : html`<span class="block h-full bg-ink opacity-60" style=${{width: Math.min(100, Math.max(0, i.share)) + '%'}}></span>`}</span>
+          <span class="whitespace-nowrap">${meta}</span>
+        </span>
+        <span class="hidden md:block text-xs text-muted truncate" title=${i.fix}>${i.fix}</span>
+      </button>
+      <${CopyButton} text=${i.prompt} label="Copy"
+        className="shrink-0 w-14 text-center text-[11px] px-2 py-0.5 bg-chip rounded border border-line hover:border-accent" />
     </div>
-    ${i.share != null ? html`<div class="mt-3 h-2 rounded bg-line overflow-hidden">
-      <div class="h-full bg-bar" style=${{width: Math.min(100, Math.max(0, i.share)) + '%'}}></div></div>` : null}
-    <p class="text-xs text-muted mt-2">${meta}</p>
-    <p class="text-sm mt-2">${i.fix}</p>
-    <details class="mt-2 text-xs">
-      <summary class="cursor-pointer text-muted">Prompt</summary>
-      <pre class="mt-2 p-2 whitespace-pre-wrap break-words bg-bg rounded border border-line">${i.prompt}</pre>
-    </details>
-    <div class="mt-3"><${CopyButton} text=${i.prompt} label="Copy"
-      className="text-xs px-2 py-1 bg-chip rounded border border-line hover:border-accent" /></div>
-  </${Card}>`;
+    ${open ? html`<div class="pl-5 pb-3 space-y-2 text-xs">
+      ${why ? html`<p class="text-muted">${why}</p>` : null}
+      ${evidence.length ? html`<ul class="space-y-0.5 text-muted list-disc pl-4">${evidence.map((e, n) => html`<li key=${n}>${e}</li>`)}</ul>` : null}
+      <pre class="p-2 max-h-48 overflow-auto whitespace-pre-wrap break-words bg-bg rounded border border-line">${i.prompt}</pre>
+    </div>` : null}
+  </li>`;
 };
 
-const Leaks = ({issues}) => {
+const Leaks = ({issues, topCount}) => {
+  const [open, setOpen] = React.useState(null);
   if (!issues.length) return html`<${Card}><p class="text-sm text-muted">No leaks detected.</p></${Card}>`;
   const all = issues.map(i => i.prompt).filter(Boolean).join('\n\n');
-  return html`<div class="space-y-4">
-    <div><${CopyButton} text=${all} label="Copy all fixes for Claude"
-      className="text-sm px-3 py-1.5 bg-chip rounded-lg border border-line hover:bg-accent/10" /></div>
-    ${issues.map(i => html`<${LeakRow} key=${i.title} i=${i} />`)}
-  </div>`;
+  const copyAll = html`<${CopyButton} text=${all} label="Copy all fixes"
+    className="text-xs px-2.5 py-1 bg-chip rounded-lg border border-line hover:border-accent" />`;
+  return html`<${Card} title="Leaks" right=${copyAll}>
+    <p class="text-xs text-muted mb-2">From the ${topCount ? topCount + ' ' : ''}top-spend sessions in the window. One session can trigger several leaks, so the shares overlap.</p>
+    <ul>${issues.map(i => html`<${LeakRow} key=${i.title} i=${i} open=${open === i.title}
+      onToggle=${() => setOpen(open === i.title ? null : i.title)} />`)}</ul>
+  </${Card}>`;
 };
 
 // Cumulative burn over time. Dashed: the same turns with context capped at benchWindow.
@@ -572,7 +585,7 @@ const App = () => {
   const tabId = TABS.some(([id]) => id === tab) ? tab : 'dashboard';
   const bodies = {
     dashboard: html`<${Dashboard} r=${report} burn=${burns[current]} sources=${sources} source=${current} onSource=${setSource} />`,
-    leaks: html`<${Leaks} issues=${report.issues ?? []} />`,
+    leaks: html`<${Leaks} issues=${report.issues ?? []} topCount=${(report.topSessions ?? []).length} />`,
     baseline: html`<${Baseline} rows=${report.baseline ?? []} />`,
     details: html`<${Details} r=${report} />`,
   };
