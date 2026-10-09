@@ -540,22 +540,29 @@ def plan_week():
     """The subscription's 7-day window, from the endpoint /usage reads; None when unavailable.
 
     Sends the Claude Code login token only to api.anthropic.com. Cached for 5 minutes."""
+    import subprocess
     import time
     import urllib.request
     if time.time() - _CACHE.get("week", (0, None))[0] < 300:
         return _CACHE["week"][1]
     week = None
     try:
-        with open(os.path.join(os.path.dirname(claude_root()), ".credentials.json")) as fh:
-            token = json.load(fh)["claudeAiOauth"]["accessToken"]
-        req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
+        try:
+            with open(os.path.join(os.path.dirname(claude_root()), ".credentials.json")) as fh:
+                creds = fh.read()
+        except OSError:  # macOS keeps the login in the Keychain
+            creds = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                capture_output=True, text=True, timeout=5, check=True).stdout
+        token = json.loads(creds)["claudeAiOauth"]["accessToken"]
+        req =urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
             "Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.load(resp)["seven_day"]
         resets = datetime.datetime.fromisoformat(data["resets_at"])
         week = {"start": resets - datetime.timedelta(days=7), "resets": resets,
                 "used": float(data["utilization"])}
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         pass
     _CACHE["week"] = (time.time(), week)
     return week
