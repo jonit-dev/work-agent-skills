@@ -139,17 +139,30 @@ def claude_user_wake(record):
 
 
 def claude_title(path):
-    """The session's latest custom or generated title, or None."""
-    title = None
+    """The session's latest custom or generated title, else its first prompt, or None.
+
+    Sessions with no human prompt (a /goal loop, an agent-started session) never get a title."""
+    title = first = None
     with open(path, errors="replace") as fh:
         for line in fh:
-            if '"customTitle"' in line or '"aiTitle"' in line:
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue
+            titled = '"customTitle"' in line or '"aiTitle"' in line
+            if not titled and (first or '"user"' not in line):
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if titled:
                 title = record.get("customTitle") or record.get("aiTitle") or title
-    return title
+            elif record.get("type") == "user" and not record.get("isMeta"):
+                content = (record.get("message") or {}).get("content")
+                if isinstance(content, str) and not content.startswith("<local-command"):
+                    command = re.search(r"<command-name>(.*?)</command-name>", content)
+                    args = re.search(r"<command-args>(.*?)</command-args>", content, re.S)
+                    text = (command.group(1) + " " + (args.group(1) if args else "")
+                            if command else content)
+                    first = " ".join(text.split())[:80] or None
+    return title or first
 
 
 def claude_turns(path):
@@ -275,6 +288,9 @@ def active_sources(requested):
     return [n for n in names if os.path.isdir(SOURCES[n][0]())]
 
 
+# Windows for the weekly-limit gain: percentage points spent in the last N hours.
+GAIN_HOURS = (1, 6, 24)
+
 # Thresholds for the per-session leak flags. Each one maps to a measured failure.
 BENCH_WINDOW = 200_000        # the benchmark: same turns with context capped here
 LATE_COMPACT_PEAK = 300_000   # context above this means auto-compact fires too late
@@ -394,6 +410,7 @@ def build_report(args):
     active = []
     now = datetime.datetime.now(datetime.timezone.utc)
     last_hour = collections.defaultdict(float)
+    recent = collections.defaultdict(collections.Counter)  # source -> {hours: spend}
     weeks = {"claude": plan_week(), "codex": codex_week()}
     week_now = collections.defaultdict(float)
 
@@ -438,6 +455,9 @@ def build_report(args):
                 if item["when"] >= now - datetime.timedelta(hours=1):
                     last_hour[source] += weighted
                     hour_cost += weighted
+                for hours in GAIN_HOURS:
+                    if item["when"] >= now - datetime.timedelta(hours=hours):
+                        recent[source][hours] += weighted
                 week = weeks.get(source)
                 if week and item["when"] >= week["start"]:
                     week_now[source] += weighted
@@ -544,7 +564,8 @@ def build_report(args):
             limit = spent * 100 / week["used"]
             hours_left = max((week["resets"] - now).total_seconds() / 3600, 1)
             burn["week"] = {"resets": week["resets"], "hours_left": hours_left, "used": week["used"],
-                            "ideal": max(limit - spent, 0) / hours_left}
+                            "ideal": max(limit - spent, 0) / hours_left,
+                            "gains": {h: recent[source][h] * 100 / limit for h in GAIN_HOURS}}
         report["burns"][source] = burn
     return report
 
@@ -994,7 +1015,8 @@ def report_view(r):
         burns[source] = {"rate": burn["rate"], "goal": goal, "basis": basis,
                          "resets": iso(week["resets"]) if week else None,
                          "hoursLeft": week["hours_left"] if week else None,
-                         "used": week["used"] if week else None}
+                         "used": week["used"] if week else None,
+                         "gains": week["gains"] if week else None}
     return {
         "generated": iso(datetime.datetime.now(datetime.timezone.utc)), "days": r["days"],
         "total": r["total"], "sessions": r["session_count"], "turns": r["turns"],
