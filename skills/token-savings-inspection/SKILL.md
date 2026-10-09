@@ -1,9 +1,23 @@
 ---
 name: token-savings-inspection
-description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a retrieval policy, a verification ladder, a retry circuit breaker, and a delegation rule, plus the scripts that measure and enforce them. Installs and configures itself for Claude Code and Codex, with config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the token budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
+description: Token doctor - run `scripts/doctor` to detect common token leaks in local Claude Code and Codex transcripts (late compaction, caller-side reads, wakeups, unbounded loops, long-lived sessions, bad config) and get ranked fixes plus an HTML report with copy-to-Claude prompts. Also cuts coding-agent token cost by preventing wasted work rather than compressing text — a retrieval policy, a verification ladder, a retry circuit breaker, and a delegation rule, plus the scripts that measure and enforce them. Installs and configures itself for Claude Code and Codex, with config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the token budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
 ---
 
 # token-savings-inspection
+
+## Start here: the doctor
+
+```bash
+scripts/doctor              # last 7 days, every agent found
+scripts/doctor 2 --source claude
+```
+
+It prints a verdict, each leak ranked by share of spend with its fix and the worst sessions,
+and the baseline levers that miss their target. It exits 1 when it finds a leak. It also
+writes `~/.cache/token-savings-inspection/report.html`: a spend-over-time chart, the
+baseline table, the leak table, and a "Copy for Claude" button per leak that copies a
+prompt with the evidence and transcript paths. The detail behind each check is in
+"Measure before you tune" below.
 
 Most coding-agent spend is not verbose text. It is work that should never have happened:
 duplicated retrieval, whole-file reads, full test suites run after every edit, retry loops
