@@ -16,6 +16,7 @@ It also starts the live report on `http://127.0.0.1:8765` when nothing serves th
 (`TOKEN_DOCTOR_PORT` moves it). Give the user that link; do not open the HTML file. The page
 rebuilds on each load and reloads every minute: active sessions, the last hour's burn rate
 against the ideal pace to the plan's weekly reset, and the leaks.
+The dashboard tabs show Dashboard first: what to act on now; then Leaks, Trends, Baseline, Details.
 
 It prints a verdict, each leak ranked by share of spend with its fix and the worst sessions,
 and the baseline levers that miss their target. It exits 1 when it finds a leak. It also
