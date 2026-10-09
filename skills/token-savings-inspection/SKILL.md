@@ -1,9 +1,23 @@
 ---
-name: token-saver
-description: Cut coding-agent token cost by preventing wasted work rather than compressing text — a retrieval policy, a verification ladder, a retry circuit breaker, and a delegation rule, plus the scripts that measure and enforce them. Installs and configures itself for Claude Code and Codex, with config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the token budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
+name: token-savings-inspection
+description: Token doctor - run `scripts/doctor` to detect common token leaks in local Claude Code and Codex transcripts (late compaction, caller-side reads, wakeups, unbounded loops, long-lived sessions, bad config) and get ranked fixes plus an HTML report with copy-to-Claude prompts. Also cuts coding-agent token cost by preventing wasted work rather than compressing text — a retrieval policy, a verification ladder, a retry circuit breaker, and a delegation rule, plus the scripts that measure and enforce them. Installs and configures itself for Claude Code and Codex, with config backup and one-command rollback. Use when setting up a new machine or agent, when asked to reduce token or context cost, when asked where the token budget or plan usage went, when a session is burning turns re-reading the same code, or when deciding whether to delegate to subagents.
 ---
 
-# token-saver
+# token-savings-inspection
+
+## Start here: the doctor
+
+```bash
+scripts/doctor              # last 7 days, every agent found
+scripts/doctor 2 --source claude
+```
+
+It prints a verdict, each leak ranked by share of spend with its fix and the worst sessions,
+and the baseline levers that miss their target. It exits 1 when it finds a leak. It also
+writes `~/.cache/token-savings-inspection/report.html`: a spend-over-time chart, the
+baseline table, the leak table, and a "Copy for Claude" button per leak that copies a
+prompt with the evidence and transcript paths. The detail behind each check is in
+"Measure before you tune" below.
 
 Most coding-agent spend is not verbose text. It is work that should never have happened:
 duplicated retrieval, whole-file reads, full test suites run after every edit, retry loops
@@ -146,13 +160,13 @@ alone and exits non-zero on failure, so it can gate a provisioning script.
 
 **It backs up before it touches anything.** Every `--apply` run first copies
 `settings.json`, `config.toml`, `CLAUDE.md` and `AGENTS.md` into
-`~/.agents/token-saver-backups/<timestamp>/` and writes a `restore.sh` beside them. Nothing
+`~/.agents/token-savings-inspection-backups/<timestamp>/` and writes a `restore.sh` beside them. Nothing
 is edited until that backup exists. `--rollback` restores the newest one; any older
 snapshot restores by running its own `restore.sh`.
 
 What it does:
 
-1. **Skills** — links `token-saver`, `prd-creator` and `prd-manager` into
+1. **Skills** — links `token-savings-inspection`, `prd-creator` and `prd-manager` into
    `~/.claude/skills/` and `~/.codex/skills/` from one shared checkout, so both agents read
    the same file and an update lands in both.
 2. **The always-on line** — appends one line to `~/.claude/CLAUDE.md` and
@@ -164,7 +178,7 @@ What it does:
    > the smallest range that answers the question and **never re-establish a fact you
    > already have** — no confirming grep after a read that answered it; run the smallest
    > test that can falsify the current hypothesis; after two failures with the same cause,
-   > stop editing and re-plan. Full policy: `~/.agents/skills/token-saver/SKILL.md`.
+   > stop editing and re-plan. Full policy: `~/.agents/skills/token-savings-inspection/SKILL.md`.
 
    It names `prd-creator` and carries its rules inline on purpose. A skill that is merely *installed*
    self-activated **zero times in ten sessions** in JetBrains' evaluation of Ponytail —
@@ -182,6 +196,7 @@ Applied by default — none of these reduce reasoning quality:
 | Claude | `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | `3` | Default is 20. Caps simultaneous fan-out; does not cap total work. |
 | Claude | `ENABLE_TOOL_SEARCH` | `true` | Defers MCP tool schemas instead of loading every definition up front. Pure win with several MCP servers. |
 | Claude | `MAX_MCP_OUTPUT_TOKENS` | `12000` | Default 25K. Bounds a pathological MCP dump. |
+| Claude | `autoCompactWindow` | `200000` | Manual for now: `setup-agents.sh` does not set it. On a 1M model the default compacts near 1M, so every turn carries up to 1M of context. |
 | Codex | `model_verbosity` | `low` | Shortens visible prose only. Reasoning is a separate setting and is untouched. |
 | Codex | `tool_output_token_limit` | `10000` | Bounds giant build and test logs. |
 | Codex | `agents.max_concurrent_threads_per_session` | `3` | Same reasoning as the Claude cap. |
@@ -218,6 +233,7 @@ scripts/burn.py                      # last 7 days, every agent found
 scripts/burn.py 30                   # last 30 days
 scripts/burn.py --source codex       # one agent only
 scripts/burn.py --list-sources       # what is installed on this machine
+scripts/burn.py 2 --html burn.html   # also write an HTML report: tiles, context bars, leak table
 ```
 
 Read the output in this order:
@@ -233,6 +249,22 @@ Read the output in this order:
    limit is the one to split, not to compress.
 4. **Tool calls.** If duplicate reads or repeated identical commands are rare, output
    compression has nothing to eat and is not your lever.
+5. **Leak checks.** Each top session gets one line per leak it shows, with the fix:
+   - *late compaction*: peak context above 300k. Set `autoCompactWindow` to about 200000.
+   - *caller reads*: 100+ file or log reads (`Read`, `sed -n`, `grep`, `rg`, `cat`, `python3 -`)
+     run in the caller's own context. Send them to a cheap read-only agent.
+   - *wakeups*: 50+ teammate, task-notification or cross-session messages. Each one is a
+     full-context turn. Ask for one report at the end.
+   - *loop*: 200+ turns per human prompt. Give the autonomous loop a stop condition and a budget.
+   - *long-lived*: open 12+ hours. Start one fresh session per task.
+6. **Config checks.** `autoCompactWindow` unset or above 300k (the env var
+   `CLAUDE_CODE_AUTO_COMPACT_WINDOW` overrides the setting), and any `MEMORY.md` index over
+   200 lines (Claude Code does not load the rest).
+
+Measured case, 2026-10-09: a 20x plan drained in 2 days. Four Opus coordinator sessions,
+18 to 40 hours old, used 77% of spend. Auto-compact was on, but with a 1M window it fired
+only near 960k, so the median turn carried about 500k. Each session also showed caller
+reads, wakeups and loop flags. `scripts/test_burn.py` checks every flag.
 
 The numbers are base-input-equivalent, not raw tokens, because raw counts overstate cheap
 cached reads and understate output, and they are scaled by a rough per-model price ratio.

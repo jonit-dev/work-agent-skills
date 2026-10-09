@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# token-saver: set up shared skills and token-efficient defaults for
+# token-savings-inspection: set up shared skills and token-efficient defaults for
 # Claude Code and Codex. Idempotent. Backs up every file it touches before
 # touching it, and can restore that backup with --rollback.
 set -euo pipefail
@@ -8,8 +8,8 @@ SKILLS_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HUB="$HOME/.agents/skills"
 CLAUDE_DIR="$HOME/.claude"
 CODEX_DIR="$HOME/.codex"
-BACKUP_ROOT="$HOME/.agents/token-saver-backups"
-SKILLS=(token-saver prd-creator prd-manager)
+BACKUP_ROOT="$HOME/.agents/token-savings-inspection-backups"
+SKILLS=(token-savings-inspection prd-creator prd-manager)
 
 # Files backed up before any change, as "label:path" pairs.
 TRACKED=(
@@ -20,10 +20,10 @@ TRACKED=(
   "codex-AGENTS.md:$CODEX_DIR/AGENTS.md"
 )
 
-BEGIN='<!-- token-saver:begin -->'
-END='<!-- token-saver:end -->'
+BEGIN='<!-- token-savings-inspection:begin -->'
+END='<!-- token-savings-inspection:end -->'
 read -r -d '' LINE <<'EOF' || true
-Token discipline, every session: slice uncertain or cross-file work into a compact PRD with the `prd-creator` skill first and execute from that, rather than exploring and implementing in one context (`prd-manager` reports where PRDs stand); retrieve the smallest range that answers the question and **never re-establish a fact you already have** — no confirming grep after a read that answered it; run the smallest test that can falsify the current hypothesis; after two failures with the same cause, stop editing and re-plan. Full policy: `~/.agents/skills/token-saver/SKILL.md`.
+Token discipline, every session: slice uncertain or cross-file work into a compact PRD with the `prd-creator` skill first and execute from that, rather than exploring and implementing in one context (`prd-manager` reports where PRDs stand); retrieve the smallest range that answers the question and **never re-establish a fact you already have** — no confirming grep after a read that answered it; run the smallest test that can falsify the current hypothesis; after two failures with the same cause, stop editing and re-plan. Full policy: `~/.agents/skills/token-savings-inspection/SKILL.md`.
 EOF
 
 APPLY=0; AGGRESSIVE=0; ROLLBACK=0; VERIFY_ONLY=0
@@ -98,7 +98,7 @@ verify() {
   done
 
   # The circuit-breaker hook: wired, and the script still executable.
-  hookcmd="$HUB/token-saver/scripts/escalate-on-churn.py"
+  hookcmd="$HUB/token-savings-inspection/scripts/escalate-on-churn.py"
   if jq -e --arg c "$hookcmd" '[.hooks.PostToolUse[]?.hooks[]?.command] | any(. == $c)' \
        "$CLAUDE_DIR/settings.json" >/dev/null 2>&1; then
     if [ -x "$hookcmd" ]; then ok "PostToolUse escalate-on-churn wired"
@@ -108,7 +108,7 @@ verify() {
   # The always-on line actually reached the files the agents read.
   for f in "$CLAUDE_DIR/CLAUDE.md" "$CODEX_DIR/AGENTS.md"; do
     grep -qF "$LINE" "$f" 2>/dev/null && ok "${f/#$HOME/\~} carries the line" \
-      || bad "${f/#$HOME/\~} is missing the token-saver line"
+      || bad "${f/#$HOME/\~} is missing the token-savings-inspection line"
   done
 
   # A rollback path must exist, or "undo with --rollback" is a lie.
@@ -155,7 +155,7 @@ if [ "$APPLY" = 1 ]; then
       did "saved $path"
     else
       # File did not exist. Restoring sets it aside rather than deleting it.
-      printf 'if [ -f %q ]; then mv %q %q.token-saver-removed; fi\n' "$path" "$path" "$path" >> "$BACKUP/restore.sh"
+      printf 'if [ -f %q ]; then mv %q %q.token-savings-inspection-removed; fi\n' "$path" "$path" "$path" >> "$BACKUP/restore.sh"
       say "absent $path (restore will move it aside, not delete)"
     fi
   done
@@ -232,7 +232,7 @@ set_claude_hook() { # wire the retry circuit breaker in as a PostToolUse hook
   # The rule is easy to write down and easy to ignore mid-loop, so it ships as a
   # hook rather than as prose. Idempotent: matched on the command path, so a
   # re-run never appends a second copy.
-  local f="$CLAUDE_DIR/settings.json" cmd="$HUB/token-saver/scripts/escalate-on-churn.py" tmp
+  local f="$CLAUDE_DIR/settings.json" cmd="$HUB/token-savings-inspection/scripts/escalate-on-churn.py" tmp
   [ -f "$f" ] || { if [ "$APPLY" = 1 ]; then mkdir -p "$CLAUDE_DIR"; echo '{}' > "$f"; fi; }
   if jq -e --arg c "$cmd" '[.hooks.PostToolUse[]?.hooks[]?.command] | any(. == $c)' \
        "$f" >/dev/null 2>&1; then
@@ -325,13 +325,13 @@ if [ "$APPLY" = 1 ]; then
   say "              execute from it in a fresh context. The largest single saving"
   say "              here: the executor never rediscovers the architecture."
   say "prd-manager   where every PRD stands, without reading them."
-  say "token-saver   this policy — read it with /token-saver or the SKILL.md path."
+  say "token-savings-inspection   this policy — read it with /token-savings-inspection or the SKILL.md path."
 fi
 
 head_ "Next"
 if [ "$APPLY" = 1 ]; then
   say "1. Start a fresh session in either agent."
-  say "2. Confirm the token-saver line is in context."
+  say "2. Confirm the token-savings-inspection line is in context."
   say "3. Re-check any time: $(basename "${BASH_SOURCE[0]}") --verify"
   say "4. Unhappy with anything: $(basename "${BASH_SOURCE[0]}") --rollback"
 else
