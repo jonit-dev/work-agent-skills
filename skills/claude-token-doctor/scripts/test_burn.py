@@ -26,7 +26,7 @@ def user(when, text):
 
 
 def run(config_dir, env_extra=None):
-    env = dict(os.environ, CLAUDE_CONFIG_DIR=config_dir)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=config_dir, XDG_CACHE_HOME=config_dir)
     env.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
     env.update(env_extra or {})
     return subprocess.run([sys.executable, os.path.join(HERE, "burn.py"), "2",
