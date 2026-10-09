@@ -405,6 +405,8 @@ def build_report(args):
             wakes = collections.Counter()
             count = 0
             peak = 0
+            hour_cost = 0.0
+            model = None
             first_context = 0
             first_seen = last_seen = None
             project = session = None
@@ -430,8 +432,10 @@ def build_report(args):
                 count += 1
                 cost += weighted
                 total += weighted
+                model = item["model"] or model
                 if item["when"] >= now - datetime.timedelta(hours=1):
                     last_hour[source] += weighted
+                    hour_cost += weighted
                 week = weeks.get(source)
                 if week and item["when"] >= week["start"]:
                     week_now[source] += weighted
@@ -480,7 +484,8 @@ def build_report(args):
                     titles[(source, project, session)] = cached(claude_title, path)
                 idle = (now - last_seen).total_seconds() / 60
                 if idle <= ACTIVE_MINUTES:
-                    active.append(((source, project, session), last_context, idle))
+                    active.append(((source, project, session), last_context, idle,
+                                   model, hour_cost))
 
     if not total:
         print("No assistant turns in the last %d days for: %s" % (args.days, ", ".join(live)))
@@ -519,7 +524,9 @@ def build_report(args):
         "title": titles.get(key), "share": share(sessions[key][0]), "turns": sessions[key][1],
         "peak": sessions[key][2], "hours": sessions[key][3], "context": context, "idle": idle,
         "flags": session_flags(*sessions[key][1:], *signals[key]),
-    } for key, context, idle in sorted(active, key=lambda a: a[2])]
+        "model": model, "rate": rate,
+        "rateShare": 100 * rate / last_hour[key[0]] if last_hour[key[0]] else 0.0,
+    } for key, context, idle, model, rate in sorted(active, key=lambda a: -a[4])]
     contexts.sort()
     report["timeline"] = sorted(timeline.items())
     report["hourly"] = sorted(hourly.items())
@@ -527,7 +534,7 @@ def build_report(args):
     report["budget"] = args.weekly_budget * 1e6 if args.weekly_budget else None
     report["baseline"] = baseline(report, contexts, totals)
     report["burns"] = {}
-    for source in live:
+    for source in (s for s in live if by_source[s]):
         week, spent = weeks.get(source), week_now[source]
         burn = {"rate": last_hour[source], "total": by_source[source], "week": None}
         if week and week["used"] >= 1 and spent:
@@ -691,8 +698,10 @@ def print_doctor(r, html_path):
         print("Burn (%s): %.1fM in the last hour, goal %.1fM/h (%s)" % (
             source, burn["rate"] / 1e6, goal / 1e6, basis))
     for s in r["active"]:
-        print("Active: %s (%s %s) context %dk, %d turns, %.0fh old, idle %.0fm%s" % (
-            (s["title"] or "(untitled)")[:40], s["source"], s["id"], s["context"] / 1000,
+        print("Active: %s (%s %s, %s) burning %.1fM/h (%.0f%% of the hour), context %dk, "
+              "%d turns, %.0fh old, idle %.0fm%s" % (
+            (s["title"] or "(untitled)")[:40], s["source"], s["id"], s["model"] or "?",
+            s["rate"] / 1e6, s["rateShare"], s["context"] / 1000,
             s["turns"], s["hours"], s["idle"],
             "; " + ", ".join(f.split(":")[0] for f in s["flags"]) if s["flags"] else ""))
     if not issues:
