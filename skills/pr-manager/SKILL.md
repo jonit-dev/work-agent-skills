@@ -201,6 +201,17 @@ gh api repos/{owner}/{repo}/pulls/<n>/comments/<comment_id>/replies -f body="Fix
 Resolve a thread only after the fix is pushed and you said so in the thread. A judgment-call
 thread: let the reviewer resolve it.
 
+## Scope and evidence
+
+- **Size:** aim for under ~400 changed lines of real code (not generated files or lockfiles). Over that,
+  say in "What changed" why it cannot be split, or split it.
+- **One logical change** a reviewer can verify on its own. Tests ship in the same PR.
+- **Performance change:** before and after numbers with units, from the same setup, in "How I checked it".
+- **Visual change:** before and after images in the PR, on the same scene and camera.
+- **AI-authored PR:** paste the real results and list every unverified area under "Not run".
+- **Dependent work:** stack PRs only when the second is a different PRD that needs the first.
+  Phases of one PRD never stack (see below).
+
 ## One PR per PRD
 
 Exactly one PR per PRD, opened as a draft at the first commit. Never one per phase: it splits
@@ -234,6 +245,7 @@ bodies, stale drafts.
 
 - [ ] Title: type, scope, PRD id, imperative outcome, true to what the PR now ships
 - [ ] Opens with "What is this PR about?" then "Why does it matter?" and passes the ten-second test
+- [ ] Over ~400 lines? Reason given or split. Perf has numbers, visual has images
 - [ ] Risks answered (breaking, performance, migration, rollback). References use `Closes #n`
 - [ ] Each evidence line has a command and result. Un-run gates say "Not run"
 - [ ] "Still open" present. PRD block collapsed at the bottom
