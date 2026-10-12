@@ -84,7 +84,7 @@ node $S/prd-close.mjs <prd file> --reopen --reason "<what regressed>" --yes
 node $S/prd-pr.mjs --create-labels --yes   # once per repository
 node $S/prd-pr.mjs <prd file> --yes        # apply the progress label, after every push
 node $S/prd-pr.mjs --all --yes             # every open PRD that has a PR
-node $S/prd-body.mjs <prd file>            # the PR body, generated from the PRD
+node $S/prd-body.mjs <prd file>            # the PRD-progress block of the PR body
 node $S/prd-body.mjs <prd file> --pr <n> --yes
 ```
 
@@ -116,8 +116,8 @@ the count; a PRD whose every remaining item is a `## Blocked on` line shows as *
 | orphan evidence files | evidence nothing references — pure bloat |
 
 **`prd-pr.mjs`** applies the progress label to the PRD's pull request and reports when more than
-one open PR names the same PRD. **`prd-body.mjs`** generates that PR's body from the PRD — TL;DR,
-the phase checklists as they actually stand, and what is still open.
+one open PR names the same PRD. **`prd-body.mjs`** generates only the collapsed PRD-progress block of that PR's body
+(phase checklists as they stand). The plain-language opening is written by hand; see `pr-manager`.
 
 **`prd-close.mjs`** is the archive move as one command. It refuses to close a PRD whose boxes are
 open — listing exactly which ones, with line numbers, so "what is left" needs no read — then
