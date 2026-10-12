@@ -102,9 +102,32 @@ The code names stay available. Put them in "Where to look first" or a line comme
    recaps. Do not add opinion or experience the work does not show. Catalog:
    <https://github.com/conorbronsdon/avoid-ai-writing>.
 7. **Light formatting.** At most one bold phrase per section, few dashes, no emoji headers.
-8. **Nothing machine-local**: no `/home/<user>/…`, `/tmp/…` log paths, session URLs, tokens.
-9. **Mermaid only**, never ASCII, and only when order or structure is the point.
-10. **Pixels get a Before / After table** with a caption on what to look at. Text is pasted, not screenshotted.
+8. **Nothing machine-local**: no `/home/<user>/…`, `/tmp/…` log paths, session URLs, tokens. Strip `Co-Authored-By` and generated-by trailers unless the repo asks.
+9. **Mermaid only**, never ASCII. Paste text; do not screenshot it.
+
+**Gather before you write.** Never write from memory of the session. Read the change:
+
+```sh
+git log --oneline origin/<base>..HEAD
+git diff --stat origin/<base>..HEAD
+```
+
+Collect the PRD or issue ids, the gate output you ran, and any capture or before/after image.
+List every PRD or issue the PR touches, with what happens to it: closes, advances, unblocks.
+
+**Screenshots** (anything with pixels): commit the image where the PR can reach it, or attach it
+with the API and use the returned URL. Use a table and caption what to look at.
+
+```markdown
+| Before | After |
+|---|---|
+| ![before](<url>) | ![after](<url>) |
+```
+
+**Mermaid** renders natively on GitHub. Use one when order or structure is the point: a new
+sequence between processes, a state machine, a pipeline with a moved stage, ownership that moved
+between layers. Skip it for a one-function fix. Label nodes with real names, keep it under about
+12 nodes, and put it next to the prose it explains.
 
 Write the body to a scratch file and use `--body-file`; `--body` strings break fences.
 
