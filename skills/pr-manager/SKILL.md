@@ -1,141 +1,207 @@
 ---
 name: pr-manager
-description: Naming and shaping pull requests so a reviewer understands one in ten seconds — the title convention, a TL;DR-first body with a done/missing checklist, one PR per PRD (never one per phase), and the progress label. Use when opening a PR, renaming or rewriting a thin one, auditing open PRs for title and shape drift, or deciding whether work needs a second PR. Not the PR lifecycle — branching, CI and merging belong to github-pr-workflow.
+description: Shape a pull request so a person who was not in the session understands it in ten seconds — plain-language title, a body that opens with "What is this PR about?" and "Why does it matter?", done and still-open lists, one PR per PRD, the progress label, and how to write PR comments (push updates, review replies, CI notes). Use when opening a PR, rewriting a body that reads as jargon, writing or replying to a PR comment, auditing open PRs, or deciding whether work needs a second PR. Not the PR lifecycle (branching, CI, merging) — that is github-pr-workflow.
 ---
 
 # pr-manager
 
-A pull request is read by someone who was not in the room. This skill is about the parts that
-decide whether they understand it: the title, the first three lines of the body, and whether
-the work arrived as one PR or five.
+The reader was not in your session. They do not know your function names. They decide in ten
+seconds whether to keep reading. So the body opens with two questions, answered in plain words:
 
-Mechanics — branching, committing, watching CI, merging — belong to
-[`github-pr-workflow`](../github-pr-workflow/SKILL.md).
-Progress numbers come from [`prd-manager`](../prd-manager/SKILL.md), which reads the PRD's own
-checkboxes.
+1. **What is this PR about?**
+2. **Why does it matter?**
 
-## The title
+Code names, `file:line`, measurements and PRD checkboxes come after. Never before.
 
-```
-<type>(<scope>): <imperative summary>          # no PRD
-<type>(<scope>): PRD-<id> <imperative summary> # PRD-backed work
-```
+Lifecycle (branch, CI, merge): [`github-pr-workflow`](../github-pr-workflow/SKILL.md).
+Progress numbers: [`prd-manager`](../prd-manager/SKILL.md).
 
-- **The PRD id goes in the title**, not only the branch or the body. It is how a reviewer
-  finds the plan, how `prd-manager` matches the PR to its PRD, and how a search six months
-  later finds why this happened.
-- `<type>` is the conventional-commit verb: `feat`, `fix`, `docs`, `refactor`, `perf`,
-  `test`, `chore`, `build`, `ci`.
-- **Imperative, present tense.** "add the budget gate", not "added" or "adding".
-- **Say the outcome, not the activity.** `fix(render): PRD-214 stop the frame crossing twice`
-  beats `fix(render): PRD-214 changes to renderWorld`.
-- **No phase suffixes.** `PRD-214 phase 2` in a title means the PRD was split across PRs —
-  see below.
-- Roughly 72 characters. A title that needs a colon-separated explainer is two titles.
+## Body template
 
-| Bad | Why | Better |
-|---|---|---|
-| `updates` | says nothing | `fix(physics): PRD-170 stop the hot path allocating` |
-| `PRD-227 work in progress` | status, not outcome; use draft state for that | `perf(core): PRD-227 cross the frame once` |
-| `feat: PRD-331 phase 3 of 5` | one PRD, five PRs | `feat(website): PRD-331 the site is a workspace app` |
-| `fix: resolve the issue where the thing breaks on some devices` | vague and over-long | `fix(android): PRD-213 bound GPU memory on Mali` |
-
-## The body
-
-Whoever opens it should learn what this is for, what is done, and what is not — before
-scrolling. Keep it short: a body nobody finishes is a body nobody read.
+Drop a section only when it is empty.
 
 ```markdown
-**TL;DR** — one sentence: what this changes and why it matters.
+## What is this PR about?
+1–3 sentences. What does the game or engine do differently after this PR?
 
-75% by the PRD's own boxes: 2/2 phases (5/5 boxes), 2/4 acceptance criteria. PRD: `path`.
+## Why does it matter?
+The problem, who feels it, what it costs. One number, with its unit and what it measures.
 
-## Phases
-### Phase 1 — name  — 3/3
-- [x] …
-## Acceptance criteria
-- [x] …
-- [ ] …
+## What changed
+3–6 bullets. One behavior each.
+
+## How I checked it
+Command → result. Anything not run: "Not run: <why>".
+
 ## Still open
-- what is not done, in plain words
+What is not done. A checklist if there are several items.
+
+## Where to look first        (only if the diff is over ~300 lines)
+2–3 files, one line each on why.
+
+<!-- prd-progress:start --> … collapsed <details> block, generated … <!-- prd-progress:end -->
 ```
 
-Generate it rather than typing it, so the PR and the PRD cannot drift apart:
+### Ten-second test
+
+Read only the first section to someone outside the project. If they cannot say what changed,
+rewrite it. The opening **fails** if it has:
+
+- a `file:line`, or a function or constant name the reader has not met
+- more than one number, or a number with no unit
+- a percentage that measures the PR's own paperwork ("25% by the PRD's boxes")
+- a sentence over 25 words, or an idea you named yourself during the session
+
+### Example (a terrain-renderer PR)
+
+Before: the opening is a 90-word run of `TerrainTiles`, `LOD_TRANSITION_FRAMES = 3`,
+`updateLodTransitionGeometry (world-tiles.ts:1292)`, `normalAt`, `setY`, then "25% by the PRD's
+own boxes: 0/3 phases (2/6 boxes)". Nobody can tell what the PR is for.
+
+After (facts from the PR's own evidence lines):
+
+```markdown
+## What is this PR about?
+Terrain tiles fade from one detail level to the next over 3 frames. Until now the CPU rewrote
+every vertex of the tile on each of those frames. This PR moves the fade to the GPU, using
+Three.js morph targets, so the CPU does no per-vertex work during a fade.
+
+## Why does it matter?
+Each fade frame cost the CPU about 1.2–2.4 ms per 65×65 tile (mean of 100 frames). Several
+tiles fade at once while the player walks, and that cost lands in the frame budget.
+
+## What changed
+- A fade frame now reads 0 heights and 0 normals from the terrain data (was 4,225 + 25,350).
+- The old CPU blend stays as the reference the new path is tested against.
+- Tile memory accounting and cleanup cover the morph data.
+
+## How I checked it
+- `pnpm exec vitest run packages/core/__tests__/world-terrain-tiles.spec.ts …` → 124 passed.
+- The GPU result matches the CPU blend within 1 mm in unit tests.
+- Not run: any GPU or visual comparison. Not run: the desktop host.
+
+## Still open
+- [ ] Terrain walk on a real GPU. The playtest used SwiftShader (software), so it proves nothing.
+- [ ] Same walk on the desktop host.
+- [ ] Choose the detail level by on-screen error (phase 3).
+```
+
+The code names stay available. Put them in "Where to look first" or a line comment on the diff.
+
+## Writing rules (body, comments, commits)
+
+1. **Answer first.** Sentence one is the point, not the context.
+2. **Short, active sentences.** Max 25 words. One idea each. "The CPU rewrites the vertices", not
+   "vertex rewriting is performed".
+3. **Define or drop internal names.** First use: name plus a few words. If the reader cannot use
+   the name, remove it.
+4. **A number needs a unit and a meaning.** "1.2 ms per fade frame per tile", not "25,000".
+5. **Never claim a gate you did not run.** "Not run" is a valid line. A fake green is not.
+6. **Cut AI filler.** No "This PR aims to", "comprehensive", "robust", "leverage", "ensure",
+   "various improvements", "I hope this helps", hedge stacks ("could potentially"), closing
+   recaps. Do not add opinion or experience the work does not show. Catalog:
+   <https://github.com/conorbronsdon/avoid-ai-writing>.
+7. **Light formatting.** At most one bold phrase per section, few dashes, no emoji headers.
+8. **Nothing machine-local**: no `/home/<user>/…`, `/tmp/…` log paths, session URLs, tokens.
+9. **Mermaid only**, never ASCII, and only when order or structure is the point.
+10. **Pixels get a Before / After table** with a caption on what to look at. Text is pasted, not screenshotted.
+
+Write the body to a scratch file and use `--body-file`; `--body` strings break fences.
 
 ```sh
-P=~/.claude/skills/prd-manager/scripts
-node $P/prd-body.mjs <prd file>                    # print it
-node $P/prd-body.mjs <prd file> --pr <n> --yes     # write it to the PR
+gh pr create --draft --base <base> --title "<title>" --body-file <scratch>/pr-body.md
+gh pr view <n>        # read it back
 ```
 
-Rules that matter more than the template:
+**The generated PRD block.** `prd-body.mjs` prints only the collapsed progress block. It never
+writes the opening. With `--pr <n> --yes` it replaces just the text between its markers, so your
+prose survives every regeneration.
 
-- **TL;DR first, always.** Not a heading, not a table of contents, not a wall of context.
-- **Every claim of evidence names the command and its result.** "tests pass" is not evidence;
-  `pnpm test` → 2463 passed is.
-- **"Still open" is not optional.** A PR that lists only what works reads as finished when it
-  is not, and the reviewer finds out during merge.
-- **No screenshots of text.** Paste the text.
-- One Mermaid diagram when a diagram beats a paragraph; none when it does not.
+```sh
+node ~/.claude/skills/prd-manager/scripts/prd-body.mjs <prd file> --pr <n> --yes
+```
+
+Long per-box evidence (log paths, full command lines) stays in the PRD. The PR links to it.
+
+## Title
+
+```
+<type>(<scope>): <imperative outcome>            # no PRD
+<type>(<scope>): PRD-<id> <imperative outcome>   # PRD-backed
+```
+
+- `<type>`: `feat fix docs refactor perf test chore build ci`.
+- PRD id **in the title**, so a reviewer can find the plan.
+- Imperative, present tense. Name the **outcome**, in words a teammate outside the area knows.
+- No phase suffix. About 72 characters. It becomes the squash subject: it must make sense in a year.
+- Keep it true. When scope changes, rename the PR. A title that says "measure" on a PR that
+  ships a feature is a lie.
+
+| Bad | Better |
+|---|---|
+| `updates` | `fix(physics): PRD-170 stop the hot path allocating` |
+| `PRD-214: measure terrain LOD blend CPU work` (PR now ships the GPU fade) | `perf(core): PRD-214 fade terrain detail levels on the GPU` |
+| `feat: PRD-331 phase 3 of 5` | `feat(website): PRD-331 make the site a workspace app` |
+| `refactor(core): updateLodTransitionGeometry uses setY` | `perf(core): PRD-214 stop rewriting terrain vertices on the CPU` |
+
+## Comments
+
+A comment is read alone, in a notification. Every comment: **answer first**, **one topic**,
+**reply in the thread**, **cite evidence** (commit SHA, command and result, CI run link), never
+repeat the body (edit the body instead), never edit another person's comment.
+
+| Moment | Shape |
+|---|---|
+| Push with new work | `Pushed <sha>: <what changed since the last push>. Next: <one thing>.` Skip if a reviewer needs nothing new. |
+| Reply to a review comment | `Fixed in <sha>: <how, one line>.` · `Not changing: <reason>.` · `Question: <q>`. |
+| CI failure | `<job> failed: <cause>. Fix: <what>. Run: <link>.` If the failure is not yours, say why. |
+| Evidence or screenshots | Caption what to look at, then the table. |
+| Blocked | `Blocked on <specific thing> from <who>. Resuming when <condition>.` |
+| Ready | `Ready: all boxes ticked. Run: <gates>. Not run: <gates>.` |
+| Decision needed | `Keep X (recommended) or switch to Y? X: … Y: …` Recommendation first. |
+
+```sh
+gh pr comment <n> --body-file <scratch>/comment.md
+gh api repos/{owner}/{repo}/pulls/<n>/comments/<comment_id>/replies -f body="Fixed in abc1234: …"
+```
+
+Resolve a thread only after the fix is pushed and you said so in the thread. A judgment-call
+thread: let the reviewer resolve it.
 
 ## One PR per PRD
 
-**Exactly one pull request per PRD, opened as a draft before phase 1 starts.**
+Exactly one PR per PRD, opened as a draft at the first commit. Never one per phase: it splits
+the evidence, repeats review on partial context, and the last PR carries a rebase nobody wanted.
 
-Phase-sized PRs are the failure this rule exists to prevent. They split one plan's evidence
-across five branches, so no branch shows the whole picture, the review happens five times on
-partial context, and the PRD's progress stops being visible anywhere. Merging them in order
-becomes its own coordination problem, and the last one always carries a rebase nobody wanted.
+- Push each phase to the same PR. Tick the PR box in the same push that ticks the PRD box.
+- Leave draft when the last acceptance box is ticked. Move the PRD to `done/` in that PR.
+- A second PR is right only for a different PRD. A big first PR is not a reason.
 
-- Open the draft early, with the PRD's checklist in the body.
-- Push each phase to that same PR as it lands.
-- Tick the box in the PR body in the same push that ticks it in the PRD. A PR box ticked
-  ahead of the PRD is the same lie as a claimed gate.
-- Take it out of draft when the last acceptance box is ticked, and archive the PRD to
-  `done/` in that same PR.
+## Progress label
 
-A second PR is right when the work is genuinely a different PRD — scope grew, so a new PRD
-cites the finished one. It is never right merely because the first PR got large.
-
-`prd-pr.mjs` reports when more than one open PR names the same PRD.
-
-## The progress label
-
-One label at a time, red through yellow to green, chosen by verified boxes — never by lines
-written or files touched.
-
-| Label | Meaning | Colour |
-|---|---|---|
-| `prd:25%` | phase 1 landed and verified | `#d73a4a` red |
-| `prd:50%` | half the phase boxes landed and verified | `#e36209` orange |
-| `prd:75%` | phases in, acceptance boxes still open | `#fbca04` yellow |
-| `prd:100% — ready` | every phase and acceptance box ticked; PR out of draft | `#0e8a16` green |
+One label, chosen by verified boxes, never by lines written. A repository's own scheme wins
+(for example a `prd:progress` script in the repo). Default scheme: `prd:25%` red, `prd:50%` orange,
+`prd:75%` yellow, `prd:100% — ready` green. Re-apply on every push; a stale label reads as a claim.
 
 ```sh
-P=~/.claude/skills/prd-manager/scripts
-node $P/prd-pr.mjs --create-labels --yes    # once per repository
-node $P/prd-pr.mjs <prd file> --yes         # label this PRD's PR, after every push
-node $P/prd-pr.mjs --all --yes              # every open PRD that has a PR
+node ~/.claude/skills/prd-manager/scripts/prd-pr.mjs <prd file> --yes
 ```
 
-Re-apply on every push. A stale label is worse than no label: it is read as a claim.
-
-## Audit the open PRs
+## Audit
 
 ```sh
-node ~/.claude/skills/pr-manager/scripts/pr-audit.mjs          # title and shape drift
-node ~/.claude/skills/pr-manager/scripts/pr-audit.mjs --json
+node ~/.claude/skills/pr-manager/scripts/pr-audit.mjs
 ```
 
-It reports, for every open PR: titles missing a conventional-commit type, titles carrying a
-phase suffix, PRDs with more than one open PR, bodies with no TL;DR or no "still open"
-section, bodies that are effectively empty, and drafts nobody has pushed to in weeks.
+Reports titles with no type or with a phase suffix, PRDs with several open PRs, bodies with no
+"what is this about" opening, openings full of code references, no "still open", near-empty
+bodies, stale drafts.
 
 ## Checklist
 
-- [ ] Title: `<type>(<scope>): PRD-<id> <imperative outcome>`, under ~72 characters
-- [ ] Body opens with a one-sentence TL;DR
-- [ ] Done and still-open are both listed, generated from the PRD
-- [ ] Exactly one open PR for this PRD
-- [ ] Progress label re-applied on this push
-- [ ] Draft until the last acceptance box is ticked
+- [ ] Title: type, scope, PRD id, imperative outcome, true to what the PR now ships
+- [ ] Opens with "What is this PR about?" then "Why does it matter?" and passes the ten-second test
+- [ ] Each evidence line has a command and result. Un-run gates say "Not run"
+- [ ] "Still open" present. PRD block collapsed at the bottom
+- [ ] One open PR for this PRD. Label re-applied. Draft until the last box
+- [ ] Read back with `gh pr view`

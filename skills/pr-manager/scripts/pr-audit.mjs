@@ -12,7 +12,9 @@ import { execFileSync } from "node:child_process";
 const CONVENTIONAL = /^(?:feat|fix|docs|refactor|perf|test|chore|build|ci|style|revert)(?:\([^)]+\))?!?:\s+\S/u;
 const PRD_ID = /\bPRD-[A-Za-z0-9.]*\d[A-Za-z0-9.-]*/giu;
 const PHASE_SUFFIX = /\bphase\s*\d|\bpart\s*\d|\b\d\s*\/\s*\d\s*$|\bstep\s*\d/iu;
-const TLDR = /\b(?:TL;?DR|TLDR|Summary|What this (?:adds|changes|does))\b/iu;
+const TLDR = /\b(?:what is this (?:PR|pull request) about|TL;?DR|TLDR|Summary|What this (?:adds|changes|does))\b/iu;
+// An opening that cites code is not plain language: file:line, or many backticked names.
+const CODE_REF = /\.(?:ts|tsx|js|mjs|cpp|rs|md):\d+|`[^`]+`/gu;
 const STILL_OPEN = /\b(?:still open|not done|remaining|outstanding|todo|what'?s missing|left to do)\b/iu;
 const TITLE_LIMIT = 72;
 
@@ -110,8 +112,16 @@ function main() {
 
   add(
     "Body has no TL;DR or summary up top",
-    "open with one sentence: what this changes and why it matters",
+    "open with 'What is this PR about?' and 'Why does it matter?' in plain words",
     prs.filter((pr) => (pr.body ?? "").trim() !== "" && !TLDR.test((pr.body ?? "").slice(0, 600))).map(label),
+  );
+
+  add(
+    "Opening is code, not plain language",
+    "first 400 chars cite file:line or 3+ backticked names — answer 'what is this about / why' in plain words first",
+    prs
+      .filter((pr) => ((pr.body ?? "").slice(0, 400).match(CODE_REF) ?? []).length >= 3)
+      .map(label),
   );
 
   add(
