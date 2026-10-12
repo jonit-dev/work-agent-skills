@@ -28,13 +28,23 @@ Drop a section only when it is empty.
 The problem, who feels it, what it costs. One number, with its unit and what it measures.
 
 ## What changed
-3–6 bullets. One behavior each.
+3–6 bullets. One behavior each. Not a file-by-file changelog.
 
 ## How I checked it
 Command → result. Anything not run: "Not run: <why>".
 
+## Risks
+Answer all four, one line each. "None" needs a reason.
+- Breaking change: …
+- Performance: …
+- Migration: …
+- Rollback: revert the PR / <other>
+
 ## Still open
 What is not done. A checklist if there are several items.
+
+## References
+`Closes #123` (GitHub closes the issue on merge) · PRD link · related PRs.
 
 ## Where to look first        (only if the diff is over ~300 lines)
 2–3 files, one line each on why.
@@ -224,6 +234,7 @@ bodies, stale drafts.
 
 - [ ] Title: type, scope, PRD id, imperative outcome, true to what the PR now ships
 - [ ] Opens with "What is this PR about?" then "Why does it matter?" and passes the ten-second test
+- [ ] Risks answered (breaking, performance, migration, rollback). References use `Closes #n`
 - [ ] Each evidence line has a command and result. Un-run gates say "Not run"
 - [ ] "Still open" present. PRD block collapsed at the bottom
 - [ ] One open PR for this PRD. Label re-applied. Draft until the last box
