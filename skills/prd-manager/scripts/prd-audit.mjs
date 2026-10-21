@@ -45,14 +45,15 @@ function listMarkdown(dir, out = []) {
 
 /**
  * Every `*.md` filename mentioned anywhere in the repo except the evidence directory
- * itself — one `git grep` rather than one per candidate file.
+ * itself — one `git grep` rather than one per candidate file. PCRE (`-P`), not ERE: glibc ERE
+ * with `-o` backtracks quadratically on long minified lines (over 10 min here vs under 1 s).
  */
 function referencedNames(repoRoot, evidenceDir) {
   const exclude = `:(exclude)${relative(repoRoot, evidenceDir)}`;
   try {
     const raw = execFileSync(
       "git",
-      ["grep", "-hoIE", "[A-Za-z0-9._/-]+\\.md", "--", ".", exclude],
+      ["grep", "-hoIP", "[A-Za-z0-9._/-]+\\.md", "--", ".", exclude],
       { cwd: repoRoot, encoding: "utf8", maxBuffer: 128 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] },
     );
     return new Set(raw.split("\n").map((line) => basename(line.trim())));
