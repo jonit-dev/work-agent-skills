@@ -137,6 +137,10 @@ and symlink from each agent's directory into it.
 | `xlsx-workbooks` | Read, build, format, and validate Excel workbooks |
 | `pokemon-tcg-api` | Query Pokémon TCG card, set, and price data |
 
+## Global instructions
+
+[`instructions/global-agent-rules.md`](instructions/global-agent-rules.md) is a drop-in global instruction file: answer style, autonomy, verification, worktrees and token discipline. Copy it to `~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md` and adapt it.
+
 ## Contributing
 
 Pull requests only — `main` is protected and both secret-scanning checks must
