@@ -86,6 +86,8 @@ node $S/prd-pr.mjs <prd file> --yes        # apply the progress label, after eve
 node $S/prd-pr.mjs --all --yes             # every open PRD that has a PR
 node $S/prd-body.mjs <prd file>            # the PRD-progress block of the PR body
 node $S/prd-body.mjs <prd file> --pr <n> --yes
+
+node $S/test-prd-template.mjs              # the prd-creator template still parses and closes
 ```
 
 ## What each one is for

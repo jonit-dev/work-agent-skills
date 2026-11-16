@@ -114,6 +114,7 @@ A PRD is only as honest as its boxes, and a box nobody can tick is worse than no
 - **What you cannot reach is not a box.** Hardware, credentials, other people and owner decisions go under `## Blocked on`, one line each naming who or what unblocks it. They do not count toward progress, and they never harden into untickable boxes.
 - **A decision deletes a moot box.** Record what was decided, by whom, on what date and why under `## Decisions`, then delete the box it made moot. Delete a box no other way. Ticked work is never deleted, and a finished PRD is never un-filed and rewritten as a fresh plan.
 - **Cap the PRD: at most 3 phases and about 8 boxes.** One claim per box; a criterion that conjoins several facts is several boxes or a `## Blocked on` line.
+- **The ACs are the allowlist.** Behavior that no AC and no safety, data or security constraint needs is out of scope. Do not add an extra option, fallback, abstraction or config. An extra that the work truly needs gets a `## Decisions` entry before you build it.
 
 ## Plan Structure
 
@@ -134,6 +135,9 @@ Problem, current behavior, relevant files inspected.
 Approach, consumer flow, reused components, data changes, risks.
 Architecture/sequence diagram only where it resolves real ambiguity.
 
+## Non-Goals
+- <adjacent behavior a reader could expect, which this PRD does not build>
+
 ## Acceptance Criteria
 - [ ] AC-1 [local]: <consumer action → observable result, platform/threshold> — proof: `<command or job or PR>` — Evidence: pending.
 
@@ -151,7 +155,7 @@ Architecture/sequence diagram only where it resolves real ambiguity.
 **Status:** NOT STARTED
 **Files:** <new/edited paths and purpose>
 **Implementation:** <steps, contracts, error handling>
-**Verification:** `<command or job>` — <assertion, ACs and distinct risks covered>
+- [ ] <phase outcome works> — proof: `<command or job>` — covers <AC ids and distinct risks>.
 ```
 
 Add required owner flags near `**Status:**`; omit absent flags rather than filling them with `None`. Allowed status values: `NOT STARTED`, `PROPOSED`, `PARTIAL`, `IN PROGRESS`, `BLOCKED`, `DONE`, `REOPENED`. Keep status values exact; put explanations on a separate line:
@@ -161,7 +165,7 @@ Add required owner flags near `**Status:**`; omit absent flags rather than filli
 **Blocker:** Implementation verified; awaiting <owner>'s <named check> for AC-3.
 ```
 
-Preserve `**Progress:**` where tooling uses it. Checkboxes are for required work/ACs, not examples, alternatives, or optional follow-ups, and not ceremony. Drop the `## Blocked on` and `## Decisions` sections when they are empty. Reuse existing required checklists instead of creating parallel copies. The closure helper's parser is authoritative for syntax; inspect it when conventions are unclear.
+Preserve `**Progress:**` where tooling uses it. Give each phase at least one box with its proof: `prd-manager` computes progress from phase boxes only, so a PRD without them reports 0% and its closure helper refuses it. Checkboxes are for required work/ACs, not examples, alternatives, or optional follow-ups, and not ceremony. Drop the `## Non-Goals`, `## Blocked on` and `## Decisions` sections when they are empty. Write Non-Goals as plain bullets, not boxes. Reuse existing required checklists instead of creating parallel copies. The closure helper's parser is authoritative for syntax; inspect it when conventions are unclear.
 
 ---
 
@@ -300,5 +304,6 @@ These are the concrete diff signatures of "implemented but not integrated." Scan
 | **Vacuous fixture** | The gate's fixture does not contain the feature under test (an overlay-packaging gate whose fixture has no overlays) |
 | **Envelope ≠ state** | The call returns success and the persisted state is unchanged — `changed: true` written next to an empty object |
 | **Pure function stands in for the loop** | The evidence harness calls the function directly; the frame loop / request path never does |
+| **Unrequested behavior** | The diff adds an option, fallback, abstraction or config that no AC names |
 
 The §0.5 audit figures are source-supplied rationale, kept inline so this skill has no dangling `references/` dependency; the sections above are the active rules.
