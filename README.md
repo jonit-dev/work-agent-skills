@@ -1,7 +1,7 @@
 # Agent Skills
 
 Reusable skills for AI coding agents — Claude Code, Codex, and anything else that
-reads a `SKILL.md`. 72 skills covering planning, execution, review, research,
+reads a `SKILL.md`. 73 skills covering planning, execution, review, research,
 and release validation.
 
 This repository is public-safe by construction: no credentials, no personal
@@ -56,6 +56,7 @@ and symlink from each agent's directory into it.
 | `dead-code-detector` | Find unused code, orphaned files, and unreachable endpoints |
 | `codebase-inspection` | Map an unfamiliar codebase before changing it |
 | `untangle-codebase` | Whole-codebase refactor: list hidden links, needless links and special cases, redesign, fix, repeat |
+| `bug-hunter` | Adversarial state-machine bug hunt with Finder, Skeptic and Arbiter rounds; investigation only |
 | `system-documenter` | Architecture cartography and living system documentation |
 | `spike` | Time-boxed experiments before committing to a build |
 | `skill-creator` / `skill-optimizer` | Author and tighten skills themselves |
