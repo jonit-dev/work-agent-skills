@@ -69,6 +69,7 @@ and symlink from each agent's directory into it.
 | `code-review-excellence` | Review diffs for actionable defects; set review standards |
 | `requesting-code-review` | Pre-commit review and quality gates |
 | `github-code-review` | Review on GitHub, with inline comments |
+| `security-audit` | Cloudflare's source-first security audit workflow, coverage ledger, independent verification, and report validators ([provenance](skills/security-audit/UPSTREAM.md)) |
 | `swarm-validated-review` | Multi-agent review with independent verification of findings |
 | `debugging-strategies` | Diagnose bugs and regressions from reproducible evidence |
 | `systematic-debugging` | Root-cause debugging workflow |
